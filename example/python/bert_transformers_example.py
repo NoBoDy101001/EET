@@ -6,7 +6,7 @@ from transformers import BertModel
 import time
 
 using_half = True
-seq_len = 128
+seq_len = 64
 batch = 4
 loop = 100
 
