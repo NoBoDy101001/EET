@@ -155,6 +155,7 @@ class EETCrossAttention():
         self,
         hidden_states,
         pre_padding_len,
+        attention_reweight=None,
         encoder_outputs=None,
         per_sample_length=None,
         pre_layernorm=False,
@@ -162,7 +163,7 @@ class EETCrossAttention():
         first_pass=False
     ):
         # TODO encoder_padding_mask fix bug 改名为encoder output length
-        return self.attention.forward(hidden_states, encoder_outputs, pre_padding_len, pre_layernorm, add_residual, per_sample_length, first_pass)
+        return self.attention.forward(hidden_states, encoder_outputs, pre_padding_len, attention_reweight, pre_layernorm, add_residual, per_sample_length, first_pass)
 
     @staticmethod
     def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True):
@@ -290,6 +291,7 @@ class EETDecoderLayer():
         self.attention = attention
         self.cross_attention = cross_attention
         self.feedforward = feedforward
+        self.attention_reweight = torch.empty(0).float()
     
     def __call__(
         self,
@@ -297,6 +299,7 @@ class EETDecoderLayer():
         encoder_outputs=None,
         first_pass=True,
         pre_padding_len=None,
+        attention_reweight=None,
         per_sample_length=None,
         head_mask=None,
         reorder_state=None,
@@ -306,6 +309,8 @@ class EETDecoderLayer():
 
         if encoder_outputs is not None and self.cross_attention is not None:
             ''' self_attn -> cross_attn -> ffn'''
+            if attention_reweight is None:
+                attention_reweight = self.attention_reweight
             self_attn_out = self.attention(
                 hidden_states=x,
                 pre_padding_len=pre_padding_len,
@@ -317,6 +322,7 @@ class EETDecoderLayer():
             cross_attn_out = self.cross_attention(
                 hidden_states=self_attn_out,
                 pre_padding_len=pre_padding_len,
+                attention_reweight=attention_reweight,
                 encoder_outputs=encoder_outputs,
                 per_sample_length=per_sample_length,
                 pre_layernorm=normalize_before,

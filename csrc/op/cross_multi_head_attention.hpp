@@ -22,28 +22,30 @@ namespace eet{
                                     const torch::Tensor& layernorm_weights,
                                     const torch::Tensor& layernorm_bias);
 
-            torch::Tensor forward(torch::Tensor& input,
-                                    torch::Tensor& memory,
-                                    const torch::Tensor& pre_padding_length,
-                                    bool pre_layernorm,
-                                    bool add_residual,
-                                    const torch::Tensor& length_per_sample,
-                                    bool first_pass);
-
+            torch::Tensor forward(torch::Tensor &input,
+                                  torch::Tensor &memory,
+                                  const torch::Tensor &pre_padding_length,
+                                  const torch::Tensor &attention_reweight,
+                                  bool pre_layernorm,
+                                  bool add_residual,
+                                  const torch::Tensor &length_per_sample,
+                                  bool first_pass);
 
             // full decode
-            torch::Tensor forward_full(torch::Tensor& input, 
-                                    torch::Tensor& memory,
-                                    const torch::Tensor& pre_padding_length,
-                                    bool pre_layernorm,
-                                    bool add_residual);
-            
+            torch::Tensor forward_full(torch::Tensor &input,
+                                       torch::Tensor &memory,
+                                       const torch::Tensor &pre_padding_length,
+                                       const torch::Tensor &attention_reweight,
+                                       bool pre_layernorm,
+                                       bool add_residual);
+
             // incremental decode
-            torch::Tensor forward_inc(torch::Tensor& input,
-                                    torch::Tensor& memory,
-                                    bool pre_layernorm,
-                                    bool add_residual,
-                                    const torch::Tensor& length_per_sample);
+            torch::Tensor forward_inc(torch::Tensor &input,
+                                      torch::Tensor &memory,
+                                      const torch::Tensor &attention_reweight,
+                                      bool pre_layernorm,
+                                      bool add_residual,
+                                      const torch::Tensor &length_per_sample);
 
             ~CrossMultiHeadAttention(){
             };
@@ -68,12 +70,12 @@ namespace eet{
             void q_k_mul(const Buffer& q_buf, const Buffer& k_buf, 
                             Buffer& qk_buf);
 
-            void qk_softmax(Buffer& qk_buf, const torch::Tensor& padding_index);
+            void qk_softmax(Buffer& qk_buf, const torch::Tensor& padding_index, const float* attention_reweight);
 
             void attn_v_mul(const Buffer& qk_buf, const Buffer& v_buf,
                             Buffer& transpose_dst);
 
-            void transpose(const Buffer& transpose_dst, Buffer&  dst);
+            void transpose(const Buffer& transpose_dst, Buffer& dst);
 
             void project(const Buffer& dst, 
                     Buffer& res,
@@ -81,9 +83,10 @@ namespace eet{
                     bool pre_layernorm,
                     bool add_residual);
 
-            void attention_dispatch(const Buffer& q_buffer,
-                                const torch::Tensor& length_per_sample,
-                                Buffer& context_buf);
+            void attention_dispatch(const Buffer &q_buffer,
+                                    const torch::Tensor &length_per_sample,
+                                    Buffer &context_buf,
+                                    const float* attention_reweight);
 
             void kv_transpose(torch::Tensor& d_K_buf, torch::Tensor& d_V_buf,Buffer& K_buf,Buffer& V_buf);
             MetaDesc desc_;

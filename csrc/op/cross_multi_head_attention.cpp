@@ -69,17 +69,18 @@ namespace eet{
         torch::Tensor CrossMultiHeadAttention::forward(torch::Tensor& input,
                                     torch::Tensor& memory,
                                     const torch::Tensor& pre_padding_length,
+                                    const torch::Tensor& attention_reweight,
                                     bool pre_layernorm,
                                     bool add_residual,
                                     const torch::Tensor& length_per_sample,
                                     bool first_pass){
             if(first_pass)
             {
-                return forward_full(input,memory,pre_padding_length,pre_layernorm,add_residual);
+                return forward_full(input,memory,pre_padding_length, attention_reweight, pre_layernorm,add_residual);
             }
             else
             {
-                return forward_inc(input,memory,pre_layernorm,add_residual,length_per_sample);
+                return forward_inc(input,memory,attention_reweight, pre_layernorm,add_residual,length_per_sample);
             }
         }
 
@@ -87,6 +88,7 @@ namespace eet{
         torch::Tensor CrossMultiHeadAttention::forward_full(torch::Tensor& input,
                             torch::Tensor& memory,
                             const torch::Tensor& pre_padding_length,
+                            const torch::Tensor& attention_reweight,
                             bool pre_layernorm,
                             bool add_residual){
             assert((input.dtype() == desc_.dtype_) && "input's dtype is not the same as CrossMultiHeadAttention's dtype");
@@ -138,7 +140,8 @@ namespace eet{
             q_buf.free();
 
             //softmax
-            qk_softmax(qk_buf,pre_padding_length);
+            const float *attn_reweight = attention_reweight.data_ptr<float>();
+            qk_softmax(qk_buf,pre_padding_length, attn_reweight);
 
             //attn * v
             Buffer& transpose_dst = MManager::get_instance().get_buffer(desc_.batch_size_ *  desc_.max_full_seq_len_ *
@@ -177,6 +180,7 @@ namespace eet{
         // incremental decoder
         torch::Tensor CrossMultiHeadAttention::forward_inc(torch::Tensor &input,
                                                            torch::Tensor &memory,
+                                                           const torch::Tensor& attention_reweight,
                                                            bool pre_layernorm,
                                                            bool add_residual,
                                                            const torch::Tensor &length_per_sample) {
@@ -216,7 +220,8 @@ namespace eet{
 
 
             //attention_dispatch
-            attention_dispatch(q_buffer,length_per_sample,context_buf);
+            const float *attn_reweight = attention_reweight.data_ptr<float>();
+            attention_dispatch(q_buffer,length_per_sample,context_buf, attn_reweight);
         
             q_buffer.free();
             k_buffer.free();
@@ -345,16 +350,17 @@ namespace eet{
 #endif
         }
 
-        void CrossMultiHeadAttention::qk_softmax(Buffer& qk_buf, const torch::Tensor& padding_index){
+        void CrossMultiHeadAttention::qk_softmax(Buffer &qk_buf, const torch::Tensor &padding_index,
+                                                 const float *attention_reweight) {
             float scalar = 1.0f;
             if (with_bias_)
                 scalar = 1 / sqrtf(size_per_head_ * 1.0f);
-            RUN_KERNEL(cross_softmax_kernel,desc_.dtype_,qk_buf.data_ptr(), cur_batch_size_,
+            RUN_KERNEL(cross_softmax_kernel,desc_.dtype_,qk_buf.data_ptr(), attention_reweight, cur_batch_size_,
                     desc_.head_num_,cur_seq_len_, mem_seq_len_, scalar, desc_.stream);
 #ifdef _DEBUG_MODE_
     cudaDeviceSynchronize();
     check_cuda_error(cudaGetLastError());
-#endif 
+#endif
         }
 
         void CrossMultiHeadAttention::attn_v_mul(const Buffer& qk_buf,
@@ -446,12 +452,13 @@ namespace eet{
         
         void CrossMultiHeadAttention::attention_dispatch(const Buffer& q_buffer,
                                                         const torch::Tensor& length_per_sample,
-                                                        Buffer& context_buf
+                                                        Buffer& context_buf,
+                                                        const float* attention_reweight
                                                         )
          {
             RUN_KERNEL(cross_attention_dispatch,desc_.dtype_,q_buffer.data_ptr(),
                         q_bias_,key_mem_cache_.data_ptr(),k_bias_,value_mem_cache_.data_ptr(),v_bias_,(int *)length_per_sample.data_ptr(),
-                        context_buf.data_ptr(),cur_batch_size_,desc_.head_num_,size_per_head_,step_,mem_seq_len_, desc_.stream);
+                        context_buf.data_ptr(),attention_reweight, cur_batch_size_,desc_.head_num_,size_per_head_,step_,mem_seq_len_, desc_.stream);
                         
             #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();

@@ -130,6 +130,7 @@ class EETT5Block():
         self.data_type = data_type
         self.relative_attention_num_buckets = cfg.relative_attention_num_buckets
         self.relative_attention_max_distance = cfg.relative_attention_max_distance
+        self.attention_reweight = torch.empty(0).float()
 
     def compute_bias(self, query_length, key_length):
         context_position = torch.arange(query_length, dtype=torch.long)[:, None].cuda()
@@ -151,6 +152,7 @@ class EETT5Block():
         encoder_outputs=None,
         first_pass=True,
         pre_padding_len=None,
+        attention_reweight=None,
         per_sample_length=None,
         head_mask=None,
         reorder_state=None,
@@ -174,6 +176,8 @@ class EETT5Block():
 
         if encoder_outputs is not None and self.cross_attention is not None:
             ''' decoder: self_masked_attn -> cross_attn -> ffn'''
+            if attention_reweight is None:
+                attention_reweight = self.attention_reweight
             self_attn_out = self.attention(
                 hidden_states=hidden_states,
                 pre_padding_len=pre_padding_len,
@@ -191,6 +195,7 @@ class EETT5Block():
             cross_attn_out = self.cross_attention(
                 hidden_states=self_attn_out,
                 pre_padding_len=pre_padding_len,
+                attention_reweight=attention_reweight,
                 encoder_outputs=encoder_outputs,
                 per_sample_length=per_sample_length,
                 pre_layernorm=normalize_before,
@@ -271,6 +276,7 @@ class EETT5Encoder():
         position_bias=None,
     ):
         hidden_states = self.embed_tokens(input_ids)
+        # i = 0
         for layer in self.layers:
             (hidden_states, position_bias) = layer(
                 hidden_states,
@@ -278,6 +284,8 @@ class EETT5Encoder():
                 normalize_before=normalize_before,
                 position_bias=position_bias,
             )
+            # print("eet layer id: ", i, " hidden states: ", hidden_states[:, :, :128])
+            # i += 1
         hidden_states = self.final_layer_norm(hidden_states)
         
         return hidden_states
@@ -308,6 +316,7 @@ class EETT5Decoder():
         encoder_outputs=None,
         first_pass=True,
         pre_padding_len=None,
+        attention_reweight=None,
         per_sample_length=None,
         head_mask=None,
         reorder_state=None,
@@ -322,6 +331,7 @@ class EETT5Decoder():
                 encoder_outputs=encoder_outputs,
                 first_pass=first_pass,
                 pre_padding_len=pre_padding_len,
+                attention_reweight=attention_reweight,
                 per_sample_length=per_sample_length,
                 head_mask=None,
                 reorder_state=reorder_state,
@@ -368,6 +378,7 @@ class EETT5Model():
         decoder_attention_mask=None,
         reorder_state=None,
         self_past_key_values_length=0,
+        attention_reweight=None,
     ):
         if attention_mask is None:
             pre_padding_len = self.pre_padding_len
@@ -395,7 +406,7 @@ class EETT5Model():
                 normalize_before=True,
                 position_bias=None,
             )
-
+        # print("encoder output: ", encoder_outputs)
         if reorder_state is not None:
             self.reorder_state = reorder_state.long()       
         if decoder_input_ids is None:
@@ -406,6 +417,7 @@ class EETT5Model():
             encoder_outputs=encoder_outputs,
             first_pass=first_pass,
             pre_padding_len=decoder_pre_padding_len,
+            attention_reweight=attention_reweight,
             per_sample_length=per_sample_length,
             head_mask=None,
             reorder_state=self.reorder_state,

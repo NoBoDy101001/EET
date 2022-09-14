@@ -513,7 +513,7 @@ void t5_cross_attention_kernel_opt(
   T* __restrict query_buf,
   T* __restrict key_cache,
   T* __restrict value_cache,
-  const int* length_per_sample, T* __restrict context_buf,
+  const int* length_per_sample, T* __restrict context_buf, const float* attention_reweight,
   int batch_size, int head_num, const int step, const int seq_len, const float scalar)
 {
   typedef Copy_t<T, size_per_head> copy_t;
@@ -611,7 +611,12 @@ void t5_cross_attention_kernel_opt(
   float local_o = 0.0f;
   for(int i = tid; i < length; i += blockDim.x)
   {
-    logits[i] = __expf(logits[i] - s_max_val);
+    if (attention_reweight != nullptr){
+      logits[i] = __expf(logits[i] - s_max_val)*attention_reweight[i];
+    }
+    else{
+      logits[i] = __expf(logits[i] - s_max_val);
+    }
     local_o += logits[i];
   }
   float val = BlockReduce(block_temp_storage).Sum(local_o);
@@ -773,7 +778,7 @@ void cross_attention_kernel(
 template <typename T>
 void cross_attention_dispatch(void* query_buf, const void* Q_bias, 
   void* key_cache, const void* K_bias, void* value_cache, const void* V_bias, const int* length,
-  void* context_buf, int& batch_size, int& head_num, int& size_per_head, int& step, int &seq_len, cudaStream_t stream)
+  void* context_buf, const float *attention_reweight, int& batch_size, int& head_num, int& size_per_head, int& step, int &seq_len, cudaStream_t stream)
   {
     // printf("test cross attn fix********\n");
     const int block_sz = ATTENTION_BLOCK_SIZE;
@@ -841,22 +846,22 @@ void cross_attention_dispatch(void* query_buf, const void* Q_bias,
       {
         case 32:
           t5_cross_attention_kernel_opt<T, 32, block_sz><<<grid, block_sz, 0, stream>>>(
-              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf,
+              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, attention_reweight,
               batch_size, head_num, step, seq_len, scalar);
           break;
         case 64:
           t5_cross_attention_kernel_opt<T, 64, block_sz><<<grid, block_sz, 0, stream>>>(
-              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf,
+              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, attention_reweight,
               batch_size, head_num, step, seq_len, scalar);
           break;
         case 96:
           t5_cross_attention_kernel_opt<T, 96, block_sz><<<grid, block_sz, 0, stream>>>(
-              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf,
+              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, attention_reweight,
               batch_size, head_num, step, seq_len, scalar);
           break;
         case 128:
           t5_cross_attention_kernel_opt<T, 128, block_sz><<<grid, block_sz, 0, stream>>>(
-              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf,
+              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, attention_reweight,
               batch_size, head_num, step, seq_len, scalar);
           break;
         default:
@@ -1002,11 +1007,11 @@ template void masked_attention_dispatch<half>(void* key_buf, void* value_buf,
 
 template void cross_attention_dispatch<float>(void *query_buf, const void *Q_bias,
                                               void *key_cache, const void *K_bias, void *value_cache, const void *V_bias, const int *length,
-                                              void *context_buf, int &batch_size, int &head_num, int &size_per_head, int &step, int &seq_len, cudaStream_t stream);
+                                              void *context_buf, const float *attention_reweight, int &batch_size, int &head_num, int &size_per_head, int &step, int &seq_len, cudaStream_t stream);
 
 template void cross_attention_dispatch<half>(void *query_buf, const void *Q_bias,
                                               void *key_cache, const void *K_bias, void *value_cache, const void *V_bias, const int *length,
-                                              void *context_buf, int &batch_size, int &head_num, int &size_per_head, int &step, int &seq_len, cudaStream_t stream);
+                                              void *context_buf, const float *attention_reweight, int &batch_size, int &head_num, int &size_per_head, int &step, int &seq_len, cudaStream_t stream);
 
 
 
