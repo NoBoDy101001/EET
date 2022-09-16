@@ -98,7 +98,9 @@ def test(batch_size=4, seq_len=8, max_seq_len=1024, using_half=True, using_eet=T
                 res_eet = eet_model(input_ids=input_ids, decoder_input_ids=decoder_input_ids, attention_mask=attention_mask, encoder_seq_length=encoder_seq_len, first_pass=first_pass, self_past_key_values_length=self_past_key_values_length, attention_reweight=attention_reweight)
                 self_past_key_values_length += decoder_input_ids.shape[1]
                 # if j == (max_seq_len - 1) and i == (loop - 1):
-                print(j, ' res eet: ', res_eet.reshape(-1)[:128], ' shape: ', res_eet.shape)
+                # print("cross attn output length: ", len(res_eet[1]), "attn output shape: ", res_eet[1][0].shape)
+                print("cross attn output length: ", len(res_eet[1]))
+                print(j, ' res eet: ', res_eet[0].reshape(-1)[:128], ' shape: ', res_eet[0].shape)
                 if first_pass:
                     first_pass = False
                 input_ids = input_inc_decoder2
@@ -121,5 +123,5 @@ def test(batch_size=4, seq_len=8, max_seq_len=1024, using_half=True, using_eet=T
 
 
 if __name__ == '__main__':
-    test(batch_size=1, seq_len=4, max_seq_len=4,
+    test(batch_size=1, seq_len=4, max_seq_len=1,
          using_half=True, using_eet=True, using_ts=False, loop=1)

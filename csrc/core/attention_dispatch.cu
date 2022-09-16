@@ -513,7 +513,7 @@ void t5_cross_attention_kernel_opt(
   T* __restrict query_buf,
   T* __restrict key_cache,
   T* __restrict value_cache,
-  const int* length_per_sample, T* __restrict context_buf, const float* attention_reweight,
+  const int* length_per_sample, T* __restrict context_buf, T* __restrict qk_buf, const float* attention_reweight,
   int batch_size, int head_num, const int step, const int seq_len, const float scalar)
 {
   typedef Copy_t<T, size_per_head> copy_t;
@@ -545,13 +545,15 @@ void t5_cross_attention_kernel_opt(
   const int bid = blockIdx.x / head_num;
   const int head_id = blockIdx.x % head_num;
 
-  int length = __ldg(&length_per_sample[bid]);
+  int length = __ldg(&length_per_sample[bid]);    // encoder output每个seq的真实长度
   const int lane_id = tid % WARP_SIZE;
 
   int qkv_id = bid * head_num * size_per_head + head_id * size_per_head;
 
   int key_value_id = bid * (seq_len * head_num * size_per_head) +
   + head_id * size_per_head;
+
+  int qk_buf_id = (bid * head_num + head_id) * seq_len;
 
   query_buf = &query_buf[qkv_id];
   key_cache = &key_cache[key_value_id];
@@ -629,6 +631,7 @@ void t5_cross_attention_kernel_opt(
   for(int i = tid; i < length; i += blockDim.x)
   {
     logits[i] = logits[i] * s_sum_inverse;
+    qk_buf[qk_buf_id + i] = (T)logits[i];
   }
   __syncthreads(); 
 
@@ -778,7 +781,7 @@ void cross_attention_kernel(
 template <typename T>
 void cross_attention_dispatch(void* query_buf, const void* Q_bias, 
   void* key_cache, const void* K_bias, void* value_cache, const void* V_bias, const int* length,
-  void* context_buf, const float *attention_reweight, int& batch_size, int& head_num, int& size_per_head, int& step, int &seq_len, cudaStream_t stream)
+  void* context_buf, void* qk_buf, const float *attention_reweight, int& batch_size, int& head_num, int& size_per_head, int& step, int &seq_len, cudaStream_t stream)
   {
     // printf("test cross attn fix********\n");
     const int block_sz = ATTENTION_BLOCK_SIZE;
@@ -846,22 +849,22 @@ void cross_attention_dispatch(void* query_buf, const void* Q_bias,
       {
         case 32:
           t5_cross_attention_kernel_opt<T, 32, block_sz><<<grid, block_sz, 0, stream>>>(
-              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, attention_reweight,
+              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, (T *)qk_buf, attention_reweight,
               batch_size, head_num, step, seq_len, scalar);
           break;
         case 64:
           t5_cross_attention_kernel_opt<T, 64, block_sz><<<grid, block_sz, 0, stream>>>(
-              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, attention_reweight,
+              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, (T *)qk_buf, attention_reweight,
               batch_size, head_num, step, seq_len, scalar);
           break;
         case 96:
           t5_cross_attention_kernel_opt<T, 96, block_sz><<<grid, block_sz, 0, stream>>>(
-              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, attention_reweight,
+              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, (T *)qk_buf, attention_reweight,
               batch_size, head_num, step, seq_len, scalar);
           break;
         case 128:
           t5_cross_attention_kernel_opt<T, 128, block_sz><<<grid, block_sz, 0, stream>>>(
-              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, attention_reweight,
+              (T *)query_buf, (T *)key_cache, (T *)value_cache, length, (T *)context_buf, (T *)qk_buf, attention_reweight,
               batch_size, head_num, step, seq_len, scalar);
           break;
         default:
@@ -1007,11 +1010,11 @@ template void masked_attention_dispatch<half>(void* key_buf, void* value_buf,
 
 template void cross_attention_dispatch<float>(void *query_buf, const void *Q_bias,
                                               void *key_cache, const void *K_bias, void *value_cache, const void *V_bias, const int *length,
-                                              void *context_buf, const float *attention_reweight, int &batch_size, int &head_num, int &size_per_head, int &step, int &seq_len, cudaStream_t stream);
+                                              void *context_buf, void* qk_buf, const float *attention_reweight, int &batch_size, int &head_num, int &size_per_head, int &step, int &seq_len, cudaStream_t stream);
 
 template void cross_attention_dispatch<half>(void *query_buf, const void *Q_bias,
                                               void *key_cache, const void *K_bias, void *value_cache, const void *V_bias, const int *length,
-                                              void *context_buf, const float *attention_reweight, int &batch_size, int &head_num, int &size_per_head, int &step, int &seq_len, cudaStream_t stream);
+                                              void *context_buf, void* qk_buf, const float *attention_reweight, int &batch_size, int &head_num, int &size_per_head, int &step, int &seq_len, cudaStream_t stream);
 
 
 
@@ -1223,6 +1226,7 @@ void t5_masked_attention_kernel(
   T* __restrict context_buf, int first_batch_size, int head_num, const int step, const T scalar, 
   const int64_t* pre_padding_len, const int64_t *reorder_index)
 {
+  // step: cur_gen_seq_len(kv_cache seq_len)
   // typedef Copy_t<T, size_per_head> copy_t;
   const int elems_per_thread = size_per_head / WARP_SIZE;
 

@@ -172,6 +172,7 @@ class EETT5Block():
             position_bias = torch.empty(0)
         
         position_bias = position_bias.contiguous()
+        attn_weights = None
         # position_bias = torch.empty(0)
 
         if encoder_outputs is not None and self.cross_attention is not None:
@@ -192,7 +193,7 @@ class EETT5Block():
                 clamp_value = torch.finfo(self_attn_out.dtype).max - 1000
                 self_attn_out = torch.clamp(self_attn_out, min=-clamp_value, max=clamp_value)
 
-            cross_attn_out = self.cross_attention(
+            cross_attn_out, attn_weights = self.cross_attention(
                 hidden_states=self_attn_out,
                 pre_padding_len=pre_padding_len,
                 attention_reweight=attention_reweight,
@@ -240,7 +241,7 @@ class EETT5Block():
                 clamp_value = torch.finfo(out.dtype).max - 1000
                 out = torch.clamp(out, min=-clamp_value, max=clamp_value)
 
-        return (out, position_bias)
+        return (out, position_bias, attn_weights)
 
     @staticmethod
     def from_torch(config, cfg, model_dict, layer_id, data_type=torch.float32, is_decoder=True, bias=True, position_embedding=None, is_standard=True):
@@ -276,16 +277,13 @@ class EETT5Encoder():
         position_bias=None,
     ):
         hidden_states = self.embed_tokens(input_ids)
-        # i = 0
         for layer in self.layers:
-            (hidden_states, position_bias) = layer(
+            (hidden_states, position_bias, attn_weights) = layer(
                 hidden_states,
                 pre_padding_len=pre_padding_len,
                 normalize_before=normalize_before,
                 position_bias=position_bias,
             )
-            # print("eet layer id: ", i, " hidden states: ", hidden_states[:, :, :128])
-            # i += 1
         hidden_states = self.final_layer_norm(hidden_states)
         
         return hidden_states
@@ -324,9 +322,10 @@ class EETT5Decoder():
         position_bias=None,
         self_past_key_values_length=0,
     ):
+        all_cross_attentions = ()
         hidden_states = self.embed_tokens(input_ids)
         for layer in self.layers:
-            (hidden_states, position_bias) = layer(
+            (hidden_states, position_bias, attn_weights) = layer(
                 hidden_states,
                 encoder_outputs=encoder_outputs,
                 first_pass=first_pass,
@@ -340,9 +339,12 @@ class EETT5Decoder():
                 position_bias=position_bias,
                 self_past_key_values_length=self_past_key_values_length,
             )
+            print("hidden states shape: ", hidden_states.shape)
+            print("attn weight shape: ", attn_weights.shape)
+            all_cross_attentions = all_cross_attentions + (attn_weights, )
         hidden_states = self.final_layer_norm(hidden_states)
 
-        return hidden_states
+        return hidden_states, all_cross_attentions
 
     @staticmethod
     def from_torch(config, cfg, embedding, position_embedding, final_layer_norm, layer_model_dict, layer_num, data_type=torch.float32, bias=True):
@@ -406,13 +408,12 @@ class EETT5Model():
                 normalize_before=True,
                 position_bias=None,
             )
-        # print("encoder output: ", encoder_outputs)
         if reorder_state is not None:
             self.reorder_state = reorder_state.long()       
         if decoder_input_ids is None:
             raise ValueError(f"You have to specify decoder input ids")
         
-        decoder_out = self.decoder(
+        decoder_out, all_cross_attentions = self.decoder(
             input_ids=decoder_input_ids,
             encoder_outputs=encoder_outputs,
             first_pass=first_pass,
@@ -426,7 +427,7 @@ class EETT5Model():
             self_past_key_values_length=self_past_key_values_length,
         )
 
-        return decoder_out
+        return decoder_out, all_cross_attentions
 
     @staticmethod
     def from_pretrained(model_id_or_path: str, max_batch, max_prompt_seq_len=512, max_full_seq_len=512, data_type=torch.float32, device_id=0):

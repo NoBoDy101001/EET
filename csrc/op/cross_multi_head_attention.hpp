@@ -4,6 +4,7 @@
 #include "op/common.hpp"
 #include "op/meta_desc.hpp"
 #include "op/mmanager.hpp"
+#include <vector>
 
 namespace eet{
     namespace op{
@@ -22,30 +23,30 @@ namespace eet{
                                     const torch::Tensor& layernorm_weights,
                                     const torch::Tensor& layernorm_bias);
 
-            torch::Tensor forward(torch::Tensor &input,
-                                  torch::Tensor &memory,
-                                  const torch::Tensor &pre_padding_length,
-                                  const torch::Tensor &attention_reweight,
-                                  bool pre_layernorm,
-                                  bool add_residual,
-                                  const torch::Tensor &length_per_sample,
-                                  bool first_pass);
+            std::vector<torch::Tensor> forward(torch::Tensor &input,
+                                               torch::Tensor &memory,
+                                               const torch::Tensor &pre_padding_length,
+                                               const torch::Tensor &attention_reweight,
+                                               bool pre_layernorm,
+                                               bool add_residual,
+                                               const torch::Tensor &length_per_sample,
+                                               bool first_pass);
 
             // full decode
-            torch::Tensor forward_full(torch::Tensor &input,
-                                       torch::Tensor &memory,
-                                       const torch::Tensor &pre_padding_length,
-                                       const torch::Tensor &attention_reweight,
-                                       bool pre_layernorm,
-                                       bool add_residual);
+            std::vector<torch::Tensor> forward_full(torch::Tensor &input,
+                                                    torch::Tensor &memory,
+                                                    const torch::Tensor &pre_padding_length,
+                                                    const torch::Tensor &attention_reweight,
+                                                    bool pre_layernorm,
+                                                    bool add_residual);
 
             // incremental decode
-            torch::Tensor forward_inc(torch::Tensor &input,
-                                      torch::Tensor &memory,
-                                      const torch::Tensor &attention_reweight,
-                                      bool pre_layernorm,
-                                      bool add_residual,
-                                      const torch::Tensor &length_per_sample);
+            std::vector<torch::Tensor> forward_inc(torch::Tensor &input,
+                                                   torch::Tensor &memory,
+                                                   const torch::Tensor &attention_reweight,
+                                                   bool pre_layernorm,
+                                                   bool add_residual,
+                                                   const torch::Tensor &length_per_sample);
 
             ~CrossMultiHeadAttention(){
             };
@@ -86,6 +87,7 @@ namespace eet{
             void attention_dispatch(const Buffer &q_buffer,
                                     const torch::Tensor &length_per_sample,
                                     Buffer &context_buf,
+                                    Buffer &qk_buf,
                                     const float* attention_reweight);
 
             void kv_transpose(torch::Tensor& d_K_buf, torch::Tensor& d_V_buf,Buffer& K_buf,Buffer& V_buf);

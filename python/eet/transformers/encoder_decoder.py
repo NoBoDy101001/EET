@@ -162,7 +162,7 @@ class EETCrossAttention():
         add_residual=True,
         first_pass=False
     ):
-        # TODO encoder_padding_mask fix bug 改名为encoder output length
+        # TODO encoder_padding_mask fix bug 改名为encoder output length 
         return self.attention.forward(hidden_states, encoder_outputs, pre_padding_len, attention_reweight, pre_layernorm, add_residual, per_sample_length, first_pass)
 
     @staticmethod
@@ -306,7 +306,7 @@ class EETDecoderLayer():
         normalize_before=True,
         add_residual=True,
     ):
-
+        attn_weights = None
         if encoder_outputs is not None and self.cross_attention is not None:
             ''' self_attn -> cross_attn -> ffn'''
             if attention_reweight is None:
@@ -319,7 +319,7 @@ class EETDecoderLayer():
                 add_residual=add_residual,
                 first_pass=first_pass
             )
-            cross_attn_out = self.cross_attention(
+            cross_attn_out, attn_weights = self.cross_attention(
                 hidden_states=self_attn_out,
                 pre_padding_len=pre_padding_len,
                 attention_reweight=attention_reweight,
