@@ -339,8 +339,6 @@ class EETT5Decoder():
                 position_bias=position_bias,
                 self_past_key_values_length=self_past_key_values_length,
             )
-            print("hidden states shape: ", hidden_states.shape)
-            print("attn weight shape: ", attn_weights.shape)
             all_cross_attentions = all_cross_attentions + (attn_weights, )
         hidden_states = self.final_layer_norm(hidden_states)
 
@@ -640,7 +638,7 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
         self_past_key_values_length=0,
     ):
         
-        transformer_outputs = self.model(
+        transformer_outputs, all_cross_attentions = self.model(
             input_ids=input_ids,
             encoder_outputs=encoder_outputs,
             encoder_seq_length=encoder_seq_length,

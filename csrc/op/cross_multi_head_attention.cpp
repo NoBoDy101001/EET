@@ -143,7 +143,7 @@ namespace eet{
             //softmax
             const float *attn_reweight = attention_reweight.data_ptr<float>();
             qk_softmax(qk_buf,pre_padding_length, attn_reweight);
-            auto attn_output = torch::from_blob(qk_buf.data_ptr(), {cur_batch_size_, desc_.head_num_, cur_seq_len_, mem_seq_len_}, desc_.options_);
+            auto attn_output = torch::from_blob(qk_buf.data_ptr(), {cur_batch_size_, desc_.head_num_, cur_seq_len_, mem_seq_len_}, desc_.options_).clone();
 
             //attn * v
             Buffer& transpose_dst = MManager::get_instance().get_buffer(desc_.batch_size_ *  desc_.max_full_seq_len_ *
@@ -229,7 +229,7 @@ namespace eet{
             //attention_dispatch
             const float *attn_reweight = attention_reweight.data_ptr<float>();
             attention_dispatch(q_buffer, length_per_sample, context_buf, qk_buf, attn_reweight);
-            auto attn_output = torch::from_blob(qk_buf.data_ptr(), {cur_batch_size_, desc_.head_num_, cur_seq_len_, mem_seq_len_}, desc_.options_);
+            auto attn_output = torch::from_blob(qk_buf.data_ptr(), {cur_batch_size_, desc_.head_num_, cur_seq_len_, mem_seq_len_}, desc_.options_).clone();
         
             q_buffer.free();
             k_buffer.free();
