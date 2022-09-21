@@ -758,6 +758,9 @@ class GenerationMixin_EET(GenerationMixin):
         # auto-regressive generation
         first_pass = True
         self_past_key_values_length = 0
+        # TODO test attention reweight
+        attention_reweight=None
+        # attention_reweight = torch.Tensor([1.0, 2.0, 3.0, 4.0]).float().cuda() # shape(batch_size,)
         while True:
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, first_pass  = first_pass,**model_kwargs)
@@ -769,6 +772,7 @@ class GenerationMixin_EET(GenerationMixin):
                 output_hidden_states=output_hidden_states,
                 first_pass=first_pass,
                 self_past_key_values_length=self_past_key_values_length,
+                attention_reweight=attention_reweight,
             )
             first_pass = False
 
@@ -777,6 +781,7 @@ class GenerationMixin_EET(GenerationMixin):
                 continue  # don't waste resources running the code we don't need
 
             next_token_logits = outputs.logits[:, -1, :]
+            cross_attentions = outputs.cross_attentions
 
             # pre-process distribution
             next_token_scores = logits_processor(input_ids, next_token_logits)

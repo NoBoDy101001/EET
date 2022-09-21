@@ -513,6 +513,7 @@ class EETT5Model():
                                                                    lambda item: item[0][:(item[0].index('.', item[0].index('.')+1))])}
 
         device = "cpu" if device_id < 0 else f"cuda:{device_id}"
+        activation_fn = cfg.feed_forward_proj
         if cfg.feed_forward_proj == "gated-gelu":
             activation_fn = "gelu_new"
         if hasattr(cfg, "n_positions"):
@@ -636,6 +637,7 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
         reorder_state=None,
         first_pass=True,
         self_past_key_values_length=0,
+        attention_reweight=None,
     ):
         
         transformer_outputs, all_cross_attentions = self.model(
@@ -648,6 +650,7 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
             decoder_attention_mask=decoder_attention_mask,
             reorder_state=reorder_state,
             self_past_key_values_length=self_past_key_values_length,
+            attention_reweight=attention_reweight,
         )
         # if self.config.feed_forward_proj != "gated-gelu":
         #     transformer_outputs = transformer_outputs * (self.config.d_model**-0.5)
@@ -658,7 +661,7 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
             past_key_values=None,
             decoder_hidden_states=None,
             decoder_attentions=None,
-            cross_attentions=None,
+            cross_attentions=all_cross_attentions,
             encoder_last_hidden_state=None,
             encoder_hidden_states=None,
             encoder_attentions=None,
@@ -675,8 +678,10 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
         first_pass=True,
         encoder_seq_length=torch.empty(0),
         self_past_key_values_length=0,
+        attention_reweight=None,
         **kwargs,
     ):
+
         return self.forward(        
             input_ids=input_ids,
             past_key_values=past_key_values,
@@ -687,6 +692,7 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
             first_pass=first_pass,
             encoder_seq_length=encoder_seq_length,
             self_past_key_values_length=self_past_key_values_length,
+            attention_reweight=attention_reweight,
             )
 
     def from_pretrained(model_id_or_path: str, max_batch, max_prompt_seq_len=200, max_full_seq_len=512, data_type=torch.float32):

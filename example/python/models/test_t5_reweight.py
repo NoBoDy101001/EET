@@ -7,7 +7,8 @@ from PIL import Image
 import requests
 import time
 
-model_dir = "/root/data/models/0727_t5_bf16/"
+# model_dir = "/root/data/models/0727_t5_bf16/"
+model_dir = "t5-small"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -44,8 +45,8 @@ def test(batch_size=4, seq_len=8, max_seq_len=1024, using_half=True, using_eet=T
         pre_padding_len = torch.sum(1 - attention_mask, 1).int().cuda()
         encoder_seq_len = encoder_seq_len - pre_padding_len
     # TODO attention reweight
-    # attention_reweight = None
-    attention_reweight = torch.Tensor([1.0, 2.0, 3.0, 4.0]).float().cuda()
+    attention_reweight = None
+    # attention_reweight = torch.Tensor([1.0, 2.0, 3.0, 4.0]).float().cuda()
 
     if using_ts:
         ts_model = T5Model.from_pretrained(model_dir)
@@ -70,7 +71,7 @@ def test(batch_size=4, seq_len=8, max_seq_len=1024, using_half=True, using_eet=T
                 with torch.no_grad():
                     res_ts = ts_model(input_ids=input_ids, decoder_input_ids=decoder_input_ids, past_key_values=past_key_values, attention_mask=attention_mask, encoder_outputs=encoder_outputs)
                 # if j == (max_seq_len - 1) and i == (loop - 1):
-                print(j, ' res ts: ', res_ts.last_hidden_state, ' shape: ', res_ts.last_hidden_state.size())
+                print(j, ' res ts: ', res_ts.last_hidden_state.reshape(-1)[:128], ' shape: ', res_ts.last_hidden_state.size())
                 past_key_values = res_ts.past_key_values
                 input_ids = input_inc_decoder2
                 decoder_input_ids = input_inc_decoder2
@@ -99,7 +100,6 @@ def test(batch_size=4, seq_len=8, max_seq_len=1024, using_half=True, using_eet=T
                 self_past_key_values_length += decoder_input_ids.shape[1]
                 # if j == (max_seq_len - 1) and i == (loop - 1):
                 # print("cross attn output length: ", len(res_eet[1]), "attn output shape: ", res_eet[1][0].shape)
-                print("cross attn output length: ", len(res_eet[1]))
                 print(j, ' res eet: ', res_eet[0].reshape(-1)[:128], ' shape: ', res_eet[0].shape)
                 if first_pass:
                     first_pass = False
@@ -123,5 +123,5 @@ def test(batch_size=4, seq_len=8, max_seq_len=1024, using_half=True, using_eet=T
 
 
 if __name__ == '__main__':
-    test(batch_size=1, seq_len=4, max_seq_len=1,
-         using_half=True, using_eet=True, using_ts=False, loop=1)
+    test(batch_size=1, seq_len=4, max_seq_len=10,
+         using_half=True, using_eet=True, using_ts=True, loop=1)
