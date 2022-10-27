@@ -201,11 +201,10 @@ namespace eet
             {   
                 if(!pre_layernorm)
                 {   
-                    // add_bias + add_residual + layer_norm
-                    RUN_KERNEL(add_bias_input_layernorm_kernel,desc_.dtype_,
-                                        output.data_ptr(),input.data_ptr(), 
-                                        output_bias_,layernorm_weights_,
-                                        layernorm_bias_,m , n, desc_.stream);
+                    // add_bias + add_residual
+                    RUN_KERNEL(add_bias_input_kernel, desc_.dtype_, output.data_ptr(), input.data_ptr(), output_bias_, m, n, desc_.stream);
+                    // post_layerNorm
+                    RUN_KERNEL(layernorm, desc_.dtype_, output.data_ptr(), layernorm_weights_, layernorm_bias_, output.data_ptr(), m, n, desc_.stream);
                 }
                 else
                 {
