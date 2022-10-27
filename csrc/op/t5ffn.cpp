@@ -52,7 +52,7 @@ namespace eet
             size_per_head_ = 64;
             d_ff_ = 1920;
             // output_ = torch::zeros({desc_.batch_size_, desc_.max_full_seq_len_, desc_.hidden_units_}, desc_.options_);
-            Buffer& emb_ffn_out = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,ffn_cache_name_);
+            // Buffer& emb_ffn_out = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,ffn_cache_name_+desc_.device_name);
 
             switch (desc_.dtype_)
             {
@@ -106,7 +106,7 @@ namespace eet
             gated_gelu(ffn_inner_gelu, ffn_inner_linear);
             ffn_inner_linear.free();
 
-            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,ffn_cache_name_);
+            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,ffn_cache_name_+desc_.device_name);
 
             fc3_mul(ffn_inner_gelu, output);
 

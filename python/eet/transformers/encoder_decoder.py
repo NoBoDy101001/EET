@@ -24,7 +24,7 @@ from EET import LayerNorm as eet_layernorm
 
 __all__ = [
     'FCLayer', 'EETLayerNorm', 'EETFeedforward', 'EETSelfAttention', 'EETEncoderLayer', 'EETEncoder', 
-    'EETSelfMaskedAttention', 'EETCrossAttention', 'EETDecoderLayer', 'EETDecoder',
+    'EETSelfMaskedAttention', 'EETCrossAttention', 'EETDecoderLayer', 'EETDecoder', 'EETEncoderPipe',
 ]
 
 
@@ -38,28 +38,28 @@ class FCLayer():
 
 
 class EETLayerNorm():
-    def __init__(self, config, layernorm_weight, layernorm_bias, data_type=torch.float32):
-        self.layernorm_weight = layernorm_weight.cuda().type(data_type)
-        self.layernorm_bias = layernorm_bias.cuda().type(data_type) if layernorm_bias is not None else torch.empty(0)
+    def __init__(self, config, layernorm_weight, layernorm_bias, data_type=torch.float32, device=0):
+        self.layernorm_weight = layernorm_weight.type(data_type).to(device)
+        self.layernorm_bias = layernorm_bias.type(data_type).to(device) if layernorm_bias is not None else torch.empty(0)
         self.layernorm = eet_layernorm(config, self.layernorm_weight, self.layernorm_bias)
 
     def __call__(self, input):
         return self.layernorm.layer_norm(input)
     
     @staticmethod
-    def from_torch(config, layernorm_weight, layernorm_bias, data_type=torch.float32):
-        layernorm = EETLayerNorm(config, layernorm_weight, layernorm_bias, data_type=data_type)
+    def from_torch(config, layernorm_weight, layernorm_bias, data_type=torch.float32, device=0):
+        layernorm = EETLayerNorm(config, layernorm_weight, layernorm_bias, data_type=data_type, device=device)
         return layernorm
 
 
 class EETFeedforward():
-    def __init__(self, config, model_dict, layer_id, data_type=torch.float32, bias=True, name="out_cache"):
-        self.intermediate_weights = torch.t(model_dict['layer.' + str(layer_id) + '.ffn.intermediate.weight']).contiguous().cuda().type(data_type)
-        self.intermediate_bias = model_dict['layer.' + str(layer_id) + '.ffn.intermediate.bias'].cuda().type(data_type) if bias else torch.empty(0)
-        self.output_weights = torch.t(model_dict['layer.' + str(layer_id) + '.ffn.output.weight']).contiguous().cuda().type(data_type)
-        self.output_bias = model_dict['layer.' + str(layer_id) + '.ffn.output.bias'].cuda().type(data_type) if bias else torch.empty(0)
-        self.layernorm_weights = model_dict['layer.' + str(layer_id) + '.ffn.layernorm.weight'].cuda().type(data_type)
-        self.layernorm_bias = model_dict['layer.' + str(layer_id) + '.ffn.layernorm.bias'].cuda().type(data_type) if bias else torch.empty(0)
+    def __init__(self, config, model_dict, layer_id, data_type=torch.float32, bias=True, name="out_cache", device=0):
+        self.intermediate_weights = torch.t(model_dict['layer.' + str(layer_id) + '.ffn.intermediate.weight']).contiguous().type(data_type).to(device)
+        self.intermediate_bias = model_dict['layer.' + str(layer_id) + '.ffn.intermediate.bias'].type(data_type).to(device) if bias else torch.empty(0)
+        self.output_weights = torch.t(model_dict['layer.' + str(layer_id) + '.ffn.output.weight']).contiguous().type(data_type).to(device)
+        self.output_bias = model_dict['layer.' + str(layer_id) + '.ffn.output.bias'].type(data_type).to(device) if bias else torch.empty(0)
+        self.layernorm_weights = model_dict['layer.' + str(layer_id) + '.ffn.layernorm.weight'].type(data_type).to(device)
+        self.layernorm_bias = model_dict['layer.' + str(layer_id) + '.ffn.layernorm.bias'].type(data_type).to(device) if bias else torch.empty(0)
 
         self.ffn = eet_ffn(config, self.intermediate_weights, self.intermediate_bias, self.output_weights, self.output_bias, self.layernorm_weights, self.layernorm_bias, name)
 
@@ -72,35 +72,35 @@ class EETFeedforward():
         return self.ffn.forward(hidden_states, pre_layernorm, add_residual)
 
     @staticmethod
-    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, name="out_cache"):
-        feedforward = EETFeedforward(config, model_dict, layer_id, data_type=data_type, bias=bias, name=name)
+    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, name="out_cache", device=0):
+        feedforward = EETFeedforward(config, model_dict, layer_id, data_type=data_type, bias=bias, name=name, device=device)
         return feedforward
 
 
 class EETSelfAttention():
-    def __init__(self, config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True):
+    def __init__(self, config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True, device=0):
         self.is_standard = is_standard
-        self.layernorm_weights = model_dict['layer.' + str(layer_id) + '.self_attn.layernorm.weight'].cuda().type(data_type)
-        self.layernorm_bias = model_dict['layer.' + str(layer_id) + '.self_attn.layernorm.bias'].cuda().type(data_type) if bias else torch.empty(0)
+        self.layernorm_weights = model_dict['layer.' + str(layer_id) + '.self_attn.layernorm.weight'].type(data_type).to(device)
+        self.layernorm_bias = model_dict['layer.' + str(layer_id) + '.self_attn.layernorm.bias'].type(data_type).to(device) if bias else torch.empty(0)
         emb_size = self.layernorm_weights.size()[-1]
 
         if self.is_standard:
-            q_weights = model_dict['layer.' + str(layer_id) + '.self_attn.q_proj.weight'].contiguous().cuda().type(data_type)
-            k_weights = model_dict['layer.' + str(layer_id) + '.self_attn.k_proj.weight'].contiguous().cuda().type(data_type)
-            v_weights = model_dict['layer.' + str(layer_id) + '.self_attn.v_proj.weight'].contiguous().cuda().type(data_type)
+            q_weights = model_dict['layer.' + str(layer_id) + '.self_attn.q_proj.weight'].contiguous().type(data_type).to(device)
+            k_weights = model_dict['layer.' + str(layer_id) + '.self_attn.k_proj.weight'].contiguous().type(data_type).to(device)
+            v_weights = model_dict['layer.' + str(layer_id) + '.self_attn.v_proj.weight'].contiguous().type(data_type).to(device)
             self.qkv_weight = torch.cat((q_weights, k_weights, v_weights), 0).transpose(0, 1).contiguous()
-            self.q_bias = model_dict['layer.' + str(layer_id) + '.self_attn.q_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.k_bias = model_dict['layer.' + str(layer_id) + '.self_attn.k_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.v_bias = model_dict['layer.' + str(layer_id) + '.self_attn.v_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.out_weights = torch.t(model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.weight']).contiguous().cuda().type(data_type)
-            self.out_bias = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
+            self.q_bias = model_dict['layer.' + str(layer_id) + '.self_attn.q_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.k_bias = model_dict['layer.' + str(layer_id) + '.self_attn.k_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.v_bias = model_dict['layer.' + str(layer_id) + '.self_attn.v_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.out_weights = torch.t(model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.weight']).contiguous().type(data_type).to(device)
+            self.out_bias = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
         else:
-            self.qkv_weight = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.weight'].contiguous().cuda().type(data_type)
-            self.q_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][:emb_size].cuda().type(data_type) if bias else torch.empty(0)
-            self.k_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][emb_size:emb_size*2].cuda().type(data_type) if bias else torch.empty(0)
-            self.v_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][emb_size*2:].cuda().type(data_type) if bias else torch.empty(0)
-            self.out_weights = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.weight'].contiguous().cuda().type(data_type)
-            self.out_bias = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
+            self.qkv_weight = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.weight'].contiguous().type(data_type).to(device)
+            self.q_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][:emb_size].type(data_type).to(device) if bias else torch.empty(0)
+            self.k_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][emb_size:emb_size*2].type(data_type).to(device) if bias else torch.empty(0)
+            self.v_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][emb_size*2:].type(data_type).to(device) if bias else torch.empty(0)
+            self.out_weights = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.weight'].contiguous().type(data_type).to(device)
+            self.out_bias = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
 
         self.attention = eet_attention(config, self.qkv_weight, self.q_bias, self.k_bias, self.v_bias,
                                        self.out_weights, self.out_bias, self.layernorm_weights, self.layernorm_bias)
@@ -117,36 +117,36 @@ class EETSelfAttention():
         return self.attention.forward(hidden_states, pre_padding_len, pre_layernorm, add_residual, need_sequence_mask, relative_attention_bias)
 
     @staticmethod
-    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True):
-        attention = EETSelfAttention(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard)
+    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True, device=0):
+        attention = EETSelfAttention(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard, device=device)
         return attention
 
 
 class EETCrossAttention():
-    def __init__(self, config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True):
+    def __init__(self, config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True, device=0):
         self.is_standard = is_standard
-        self.layernorm_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.layernorm.weight'].cuda().type(data_type)
-        self.layernorm_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.layernorm.bias'].cuda().type(data_type) if bias else torch.empty(0)
+        self.layernorm_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.layernorm.weight'].type(data_type).to(device)
+        self.layernorm_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.layernorm.bias'].type(data_type).to(device) if bias else torch.empty(0)
         emb_size = self.layernorm_weights.size()[-1]
 
         if self.is_standard:
-            self.q_weights = torch.t(model_dict['layer.' + str(layer_id) + '.encoder_attn.q_proj.weight']).contiguous().cuda().type(data_type)
-            self.k_weights = torch.t(model_dict['layer.' + str(layer_id) + '.encoder_attn.k_proj.weight']).contiguous().cuda().type(data_type)
-            self.v_weights = torch.t(model_dict['layer.' + str(layer_id) + '.encoder_attn.v_proj.weight']).contiguous().cuda().type(data_type)
-            self.q_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.q_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.k_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.k_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.v_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.v_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.out_weights = torch.t(model_dict['layer.' + str(layer_id) + '.encoder_attn.out_proj.weight']).contiguous().cuda().type(data_type)
-            self.out_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.out_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
+            self.q_weights = torch.t(model_dict['layer.' + str(layer_id) + '.encoder_attn.q_proj.weight']).contiguous().type(data_type).to(device)
+            self.k_weights = torch.t(model_dict['layer.' + str(layer_id) + '.encoder_attn.k_proj.weight']).contiguous().type(data_type).to(device)
+            self.v_weights = torch.t(model_dict['layer.' + str(layer_id) + '.encoder_attn.v_proj.weight']).contiguous().type(data_type).to(device)
+            self.q_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.q_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.k_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.k_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.v_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.v_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.out_weights = torch.t(model_dict['layer.' + str(layer_id) + '.encoder_attn.out_proj.weight']).contiguous().type(data_type).to(device)
+            self.out_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.out_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
         else:
-            self.q_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.q_proj.weight'].contiguous().cuda().type(data_type)
-            self.k_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.kv_proj.weight'][:, :emb_size].contiguous().cuda().type(data_type)
-            self.v_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.kv_proj.weight'][:, emb_size:].contiguous().cuda().type(data_type)
-            self.q_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.q_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.k_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.kv_proj.bias'][:emb_size].cuda().type(data_type) if bias else torch.empty(0)
-            self.v_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.kv_proj.bias'][emb_size:].cuda().type(data_type) if bias else torch.empty(0)
-            self.out_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.out_proj.weight'].contiguous().cuda().type(data_type)
-            self.out_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.out_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
+            self.q_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.q_proj.weight'].contiguous().type(data_type).to(device)
+            self.k_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.kv_proj.weight'][:, :emb_size].contiguous().type(data_type).to(device)
+            self.v_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.kv_proj.weight'][:, emb_size:].contiguous().type(data_type).to(device)
+            self.q_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.q_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.k_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.kv_proj.bias'][:emb_size].type(data_type).to(device) if bias else torch.empty(0)
+            self.v_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.kv_proj.bias'][emb_size:].type(data_type).to(device) if bias else torch.empty(0)
+            self.out_weights = model_dict['layer.' + str(layer_id) + '.encoder_attn.out_proj.weight'].contiguous().type(data_type).to(device)
+            self.out_bias = model_dict['layer.' + str(layer_id) + '.encoder_attn.out_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
 
         self.attention = eet_cross_attention(config, self.q_weights, self.k_weights, self.v_weights, self.q_bias,
                                             self.k_bias, self.v_bias, self.out_weights, self.out_bias, self.layernorm_weights, self.layernorm_bias)
@@ -165,35 +165,35 @@ class EETCrossAttention():
         return self.attention.forward(hidden_states, encoder_outputs, pre_padding_len, pre_layernorm, add_residual, per_sample_length, first_pass)
 
     @staticmethod
-    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True):
-        attention = EETCrossAttention(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard)
+    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True, device=0):
+        attention = EETCrossAttention(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard, device=device)
         return attention
 
 
 class EETSelfMaskedAttention():
-    def __init__(self, config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True):
+    def __init__(self, config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True, device=0):
         self.is_standard = is_standard
-        self.layernorm_weights = model_dict['layer.' + str(layer_id) + '.self_attn.layernorm.weight'].cuda().type(data_type)
-        self.layernorm_bias = model_dict['layer.' + str(layer_id) + '.self_attn.layernorm.bias'].cuda().type(data_type) if bias else torch.empty(0)
+        self.layernorm_weights = model_dict['layer.' + str(layer_id) + '.self_attn.layernorm.weight'].type(data_type).to(device)
+        self.layernorm_bias = model_dict['layer.' + str(layer_id) + '.self_attn.layernorm.bias'].type(data_type).to(device) if bias else torch.empty(0)
         emb_size = self.layernorm_weights.size()[-1]
 
         if self.is_standard:
-            q_weights = model_dict['layer.' + str(layer_id) + '.self_attn.q_proj.weight'].contiguous().cuda().type(data_type)
-            k_weights = model_dict['layer.' + str(layer_id) + '.self_attn.k_proj.weight'].contiguous().cuda().type(data_type)
-            v_weights = model_dict['layer.' + str(layer_id) + '.self_attn.v_proj.weight'].contiguous().cuda().type(data_type)
+            q_weights = model_dict['layer.' + str(layer_id) + '.self_attn.q_proj.weight'].contiguous().type(data_type).to(device)
+            k_weights = model_dict['layer.' + str(layer_id) + '.self_attn.k_proj.weight'].contiguous().type(data_type).to(device)
+            v_weights = model_dict['layer.' + str(layer_id) + '.self_attn.v_proj.weight'].contiguous().type(data_type).to(device)
             self.qkv_weight = torch.cat((q_weights, k_weights, v_weights), 0).transpose(0, 1).contiguous()
-            self.q_bias = model_dict['layer.' + str(layer_id) + '.self_attn.q_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.k_bias = model_dict['layer.' + str(layer_id) + '.self_attn.k_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.v_bias = model_dict['layer.' + str(layer_id) + '.self_attn.v_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
-            self.out_weights = torch.t(model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.weight']).contiguous().cuda().type(data_type)
-            self.out_bias = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
+            self.q_bias = model_dict['layer.' + str(layer_id) + '.self_attn.q_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.k_bias = model_dict['layer.' + str(layer_id) + '.self_attn.k_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.v_bias = model_dict['layer.' + str(layer_id) + '.self_attn.v_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
+            self.out_weights = torch.t(model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.weight']).contiguous().type(data_type).to(device)
+            self.out_bias = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
         else:
-            self.qkv_weight = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.weight'].contiguous().cuda().type(data_type)
-            self.q_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][:emb_size].cuda().type(data_type) if bias else torch.empty(0)
-            self.k_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][emb_size:emb_size*2].cuda().type(data_type) if bias else torch.empty(0)
-            self.v_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][emb_size*2:].cuda().type(data_type) if bias else torch.empty(0)
-            self.out_weights = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.weight'].contiguous().cuda().type(data_type)
-            self.out_bias = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.bias'].cuda().type(data_type) if bias else torch.empty(0)
+            self.qkv_weight = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.weight'].contiguous().type(data_type).to(device)
+            self.q_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][:emb_size].type(data_type).to(device) if bias else torch.empty(0)
+            self.k_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][emb_size:emb_size*2].type(data_type).to(device) if bias else torch.empty(0)
+            self.v_bias = model_dict['layer.' + str(layer_id) + '.self_attn.qkv_proj.bias'][emb_size*2:].type(data_type).to(device) if bias else torch.empty(0)
+            self.out_weights = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.weight'].contiguous().type(data_type).to(device)
+            self.out_bias = model_dict['layer.' + str(layer_id) + '.self_attn.out_proj.bias'].type(data_type).to(device) if bias else torch.empty(0)
 
         self.attention = eet_masked_attention(config, self.qkv_weight, self.q_bias, self.k_bias,
                                              self.v_bias, self.out_weights, self.out_bias, self.layernorm_weights, self.layernorm_bias)
@@ -211,8 +211,8 @@ class EETSelfMaskedAttention():
         return self.attention.forward(hidden_states, pre_padding_len, reorder_state, pre_layernorm, add_residual, first_pass, relative_attention_bias)
 
     @staticmethod
-    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True):
-        attention = EETSelfMaskedAttention(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard)
+    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, is_standard=True, device=0):
+        attention = EETSelfMaskedAttention(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard, device=device)
         return attention
 
 
@@ -244,11 +244,57 @@ class EETEncoderLayer():
         return out
 
     @staticmethod
-    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, name='encoder_out_cache'):
-        attention = EETSelfAttention.from_torch(config=config, model_dict=model_dict, layer_id=layer_id, data_type=data_type, bias=bias)
-        feedforward = EETFeedforward.from_torch(config=config, model_dict=model_dict, layer_id=layer_id, data_type=data_type, bias=bias, name=name)
+    def from_torch(config, model_dict, layer_id, data_type=torch.float32, bias=True, name='encoder_out_cache', device=0):
+        attention = EETSelfAttention.from_torch(config=config, model_dict=model_dict, layer_id=layer_id, data_type=data_type, bias=bias, device=device)
+        feedforward = EETFeedforward.from_torch(config=config, model_dict=model_dict, layer_id=layer_id, data_type=data_type, bias=bias, name=name, device=device)
         layer = EETEncoderLayer(config, attention, feedforward)
         return layer
+
+class EETEncoderPipe():
+    def __init__(self, EncoderLayers, balances, devices):
+        self.layers = EncoderLayers
+        self.balances = balances
+        self.devices = devices
+
+    def __call__(
+        self,
+        hidden_states,
+        pre_padding_len=None,
+        normalize_before=False,
+        need_sequence_mask=False,
+    ):
+        layer_id = 0
+        for i in range(len(self.balances)):
+            torch.cuda.set_device(self.devices[i])
+            hidden_states = hidden_states.to(self.devices[i])
+            pre_padding_len = pre_padding_len.to(self.devices[i])
+            for _ in range(self.balances[i]):
+                layer = self.layers[layer_id]
+                hidden_states = layer(
+                    hidden_states,
+                    pre_padding_len=pre_padding_len,
+                    normalize_before=normalize_before,
+                    need_sequence_mask=need_sequence_mask
+                )
+                layer_id += 1
+        return hidden_states
+
+    @staticmethod
+    def from_torch(configs, balances, devices, layer_model_dict, layer_num, data_type=torch.float32, bias=True):
+        """from torch."""
+        assert sum(balances) == layer_num
+        EncoderLayers = []
+        layer_id = 0
+        for i in range(len(balances)):
+            for _ in range(balances[i]):
+                EncoderLayers.extend(
+                    [
+                        EETEncoderLayer.from_torch(configs[i], layer_model_dict['layer.' + str(layer_id)], layer_id, data_type=data_type, bias=bias, device=devices[i])
+                    ]
+                )
+                layer_id += 1
+        eet_encoder = EETEncoderPipe(EncoderLayers, balances, devices)
+        return eet_encoder
 
 
 class EETEncoder():
@@ -272,13 +318,13 @@ class EETEncoder():
         return hidden_states
 
     @staticmethod
-    def from_torch(config, layer_model_dict, layer_num, data_type=torch.float32, bias=True):
+    def from_torch(config, layer_model_dict, layer_num, data_type=torch.float32, bias=True, device=0):
         """from torch."""
         EncoderLayers = []
         for i in range(layer_num):
             EncoderLayers.extend(
                 [
-                    EETEncoderLayer.from_torch(config, layer_model_dict['layer.' + str(i)], i, data_type=data_type, bias=bias)
+                    EETEncoderLayer.from_torch(config, layer_model_dict['layer.' + str(i)], i, data_type=data_type, bias=bias, device=device)
                 ]
             )
         eet_encoder = EETEncoder(EncoderLayers)
@@ -347,12 +393,12 @@ class EETDecoderLayer():
         return out
 
     @staticmethod
-    def from_torch(config, model_dict, layer_id, data_type=torch.float32, add_cross_attn=True, bias=True, is_standard=True):
-        attention = EETSelfMaskedAttention.from_torch(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard)
-        feedforward = EETFeedforward.from_torch(config, model_dict, layer_id, data_type=data_type, bias=bias, name="decoder_out_cache")
+    def from_torch(config, model_dict, layer_id, data_type=torch.float32, add_cross_attn=True, bias=True, is_standard=True, device=0):
+        attention = EETSelfMaskedAttention.from_torch(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard, device=device)
+        feedforward = EETFeedforward.from_torch(config, model_dict, layer_id, data_type=data_type, bias=bias, name="decoder_out_cache", device=device)
 
         if add_cross_attn:
-            cross_attention = EETCrossAttention.from_torch(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard)
+            cross_attention = EETCrossAttention.from_torch(config, model_dict, layer_id, data_type=data_type, bias=bias, is_standard=is_standard, device=device)
             layer = EETDecoderLayer(config, attention, feedforward, cross_attention)
         else:
             layer = EETDecoderLayer(config, attention, feedforward)
@@ -390,13 +436,13 @@ class EETDecoder():
         return hidden_states
     
     @staticmethod
-    def from_torch(config, layer_model_dict, layer_num, data_type=torch.float32, bias=True):
+    def from_torch(config, layer_model_dict, layer_num, data_type=torch.float32, bias=True, device=0):
         """from torch."""
         DecoderLayers = []
         for i in range(layer_num):
             DecoderLayers.extend(
                 [
-                    EETDecoderLayer.from_torch(config, layer_model_dict['layer.' + str(i)], i, data_type=data_type, bias=bias)
+                    EETDecoderLayer.from_torch(config, layer_model_dict['layer.' + str(i)], i, data_type=data_type, bias=bias, device=0)
                 ]
             )
 

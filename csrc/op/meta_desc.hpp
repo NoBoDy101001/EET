@@ -22,10 +22,11 @@ class MetaDesc{
             layer_num_(layer_num),
             max_seq_len_(max_seq_len),
             max_full_seq_len_(max_full_seq_len),
+            device_name(cuda_device),
             activation_fn_(activation_fn)
     {
         dtype_ = torch::python::detail::py_object_to_dtype(dtype);
-    
+        rank_id_ = stoi(cuda_device.substr(5));
         options_ = torch::TensorOptions().dtype(dtype_).device(cuda_device).requires_grad(requires_grad);
         switch(dtype_){
             case torch::kFloat32:
@@ -42,7 +43,7 @@ class MetaDesc{
         }
         is_available(); 
         if (cublasHandle == nullptr || stream == nullptr){  
-            // printf("create handel\n");
+            cudaSetDevice(rank_id_);
             check_cuda_error(cublasCreate(&cublasHandle));
             check_cuda_error(cudaStreamCreate(&stream));
             check_cuda_error(cublasSetStream(cublasHandle, stream));
@@ -99,13 +100,15 @@ class MetaDesc{
     int max_seq_len_;
     int max_full_seq_len_;
     int layer_num_;
+    int rank_id_;
+    std::string device_name;
     std::string activation_fn_;
     torch::TensorOptions options_;
     cudaDataType_t computeType_;
     c10::ScalarType dtype_;
 
-    static cublasHandle_t cublasHandle;
-    static cudaStream_t stream;
+    cublasHandle_t cublasHandle = 0;
+    cudaStream_t stream = 0;
 
 
     void is_available(){

@@ -39,7 +39,7 @@ namespace eet{
             // output_ = torch::zeros({desc_.batch_size_ , desc_.max_full_seq_len_ ,desc_.hidden_units_}, desc_.options_);
             key_mem_cache_ =torch::zeros({desc_.batch_size_ , desc_.max_seq_len_ ,desc_.hidden_units_}, desc_.options_);
             value_mem_cache_ = torch::zeros_like(key_mem_cache_);
-            Buffer& emb_ffn_out = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"cross_attn");
+            // Buffer& emb_ffn_out = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"cross_attn"+desc_.device_name);
 
             switch(desc_.dtype_){
                 case torch::kFloat32:
@@ -162,7 +162,7 @@ namespace eet{
             transpose(transpose_dst, dst);
             transpose_dst.free();
 
-            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"cross_attn");
+            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"cross_attn"+desc_.device_name);
 
             //project
             project(dst,output,input ,pre_layernorm,add_residual);
@@ -221,7 +221,7 @@ namespace eet{
             q_buffer.free();
             k_buffer.free();
             v_buffer.free();
-            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"cross_attn");
+            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"cross_attn"+desc_.device_name);
 
             project(context_buf, output, input,pre_layernorm,add_residual);
 
@@ -327,7 +327,7 @@ namespace eet{
 
         void CrossMultiHeadAttention::q_k_mul(const Buffer& q_buf, const Buffer& k_buf,
                                                 Buffer& qk_buf){
-            check_cuda_error(cublasGemmStridedBatchedEx(MetaDesc::cublasHandle,
+            check_cuda_error(cublasGemmStridedBatchedEx(desc_.cublasHandle,
                 CUBLAS_OP_T, CUBLAS_OP_N,
                 mem_seq_len_, cur_seq_len_, size_per_head_,
                 alpha_,

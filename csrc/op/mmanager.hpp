@@ -6,7 +6,7 @@
 #include <unordered_map>
 
 #define MAX_BUFFER_SIZE 100
-#define MAX_CACHE_SIZE 8 //cache_is dedicated to storing output, there are several modules, so the number is relatively small
+#define MAX_CACHE_SIZE 64 //cache_is dedicated to storing output, there are several modules, so the number is relatively small
 namespace eet{
     //buffer for workers
     class Buffer{
@@ -170,11 +170,13 @@ namespace eet{
                              break;
                      }
                     for (auto& buffer : buffers_){
-                        if ((buffer.is_ok(size, dtype) && strict) ||
-                                (buffer.get_tensor().nbytes() >= size * itemsize && !strict)){
-                            buffer.set_busy();
-                            buffer.register_str(name);
-                            return buffer;
+                        if (options.device() == buffer.get_tensor().device()) {
+                            if ((buffer.is_ok(size, dtype) && strict) ||
+                                    (buffer.get_tensor().nbytes() >= size * itemsize && !strict)){
+                                buffer.set_busy();
+                                buffer.register_str(name);
+                                return buffer;
+                            }
                         }
                     }
                     std::cout << "There are " << buffers_.size() << " buffer in vector" << std::endl;

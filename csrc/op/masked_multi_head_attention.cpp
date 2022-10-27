@@ -38,7 +38,7 @@ namespace eet{
             k_cache_ = torch::zeros({desc_.batch_size_, desc_.max_seq_len_, desc_.hidden_units_}, desc_.options_);
             v_cache_ = torch::zeros_like(k_cache_);
             check_cuda_error(cudaMalloc(&fused_qkv_ptr_,sizeof(void**) * FUSED_QKV_PTR_SIZE));
-            Buffer& attn_out = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache");
+            // Buffer& attn_out = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache"+desc_.device_name);
 
             qkv_kernel_ = (void**)fused_qkv_ptr_;
             qkv_input_  = qkv_kernel_ + QKV_PTR_SIZE;
@@ -183,7 +183,7 @@ namespace eet{
             transpose_dst.free();
 
             // project
-            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache");
+            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache"+desc_.device_name);
 
             project(dst,output,input ,pre_layernorm,add_residual);
 
@@ -237,7 +237,7 @@ namespace eet{
             masked_attention(qkv_buffer,context_buf,padding_len,reorder_index, relative_attention_bias_);
             qkv_buffer.free();
 			
-            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache");
+            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache"+desc_.device_name);
             project(context_buf, output, input,pre_layernorm,add_residual);
             context_buf.free();
             auto res = torch::from_blob(output.data_ptr(), input.sizes(), input.strides(), desc_.options_);
