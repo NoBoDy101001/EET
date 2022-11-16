@@ -77,18 +77,17 @@ namespace eet
                                                     bool add_residual)
         {
             assert((input.dtype() == desc_.dtype_) && "input's dtype is not the same as FeedForwardNetwork's dtype");
-            cur_batch_size_ = input.sizes()[0];
-            cur_seq_len_ = input.sizes()[1];
+            assert((input.size()[-1] == desc_.hidden_units_) && "input's last shape is not the same as model dim");
+            num_tokens_ = input.numel() / desc_.hidden_units_;
 
             //ffn_inner
-            Buffer &ffn_inner = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
-                                                                        desc_.hidden_units_ * 4,
+            Buffer &ffn_inner = MManager::get_instance().get_buffer(num_tokens_ * desc_.hidden_units_ * 4,
                                                                     desc_.dtype_, desc_.options_, "ffn_inner", false);
 
-            if(pre_layernorm)
+            if(pre_layernorm && layernorm_weights_ != nullptr)
             {
                 // pre_layerNorm
-                Buffer& layernorm_tensor = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                Buffer& layernorm_tensor = MManager::get_instance().get_buffer(num_tokens_ *
                                                                                desc_.hidden_units_, desc_.dtype_, desc_.options_, "ffn_layernorm");
                 layer_norm(input, layernorm_tensor);
 
@@ -102,7 +101,7 @@ namespace eet
             }
 
             add_bias_act(ffn_inner);
-            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,ffn_cache_name_+desc_.device_name);
+            Buffer& output = MManager::get_instance().get_cache(num_tokens_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,ffn_cache_name_+desc_.device_name);
 
             fc2_mul(ffn_inner, output);
 
@@ -117,7 +116,7 @@ namespace eet
         // layerNorm
         void FeedForwardNetwork::layer_norm(const torch::Tensor& input_tensor, Buffer& layernorm_tensor)
         {
-            const int m = cur_batch_size_ * cur_seq_len_;
+            const int m = num_tokens_;
             int n = desc_.hidden_units_;
             if (layernorm_bias_ != nullptr) {
                 RUN_KERNEL(layernorm,desc_.dtype_,input_tensor.data_ptr(),layernorm_weights_,layernorm_bias_,layernorm_tensor.data_ptr(), m, n, desc_.stream);
@@ -133,7 +132,7 @@ namespace eet
 
         void FeedForwardNetwork::fc1_mul(void* input, Buffer &ffn_inner)
         {
-            const int m = cur_batch_size_ * cur_seq_len_;
+            const int m = num_tokens_;
             int k = desc_.hidden_units_ ;
             int n = 4 * k;
             
@@ -156,7 +155,7 @@ namespace eet
 
         void FeedForwardNetwork::add_bias_act(Buffer& ffn_inner)
         {
-            int m = cur_batch_size_ * cur_seq_len_;
+            int m = num_tokens_;
             int n = 4 * desc_.hidden_units_ ;
             
             RUN_KERNEL(add_bias_act_kernel,desc_.dtype_,ffn_inner.data_ptr(), intermediate_bias_, m, n ,act_type_ ,desc_.stream)
@@ -169,7 +168,7 @@ namespace eet
 
         void FeedForwardNetwork::fc2_mul(const Buffer& ffn_inner, Buffer& output)
         { 
-            const int m = cur_batch_size_ * cur_seq_len_;
+            const int m = num_tokens_;
             int n = desc_.hidden_units_ ;
             int k = 4 * n;
 
@@ -193,13 +192,13 @@ namespace eet
 
         void FeedForwardNetwork::add_input_bias_layernorm(Buffer& output,torch::Tensor& input,bool pre_layernorm, bool add_residual)
         {
-            const int m = cur_batch_size_ * cur_seq_len_;
+            const int m = num_tokens_;
             int n = desc_.hidden_units_ ;
             int k = 4 * n;
 
             if(add_residual)
             {   
-                if(!pre_layernorm)
+                if(!pre_layernorm && layernorm_weights_ != nullptr)
                 {   
                     // add_bias + add_residual
                     RUN_KERNEL(add_bias_input_kernel, desc_.dtype_, output.data_ptr(), input.data_ptr(), output_bias_, m, n, desc_.stream);

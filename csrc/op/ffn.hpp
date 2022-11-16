@@ -42,8 +42,7 @@ namespace eet{
 
             cublasGemmAlgo_t fc1_algo_, fc2_algo_;
             int act_type_;
-            int cur_batch_size_;
-            int cur_seq_len_;
+            int num_tokens_;
             int size_per_head_;
 
             void* alpha_;

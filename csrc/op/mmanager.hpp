@@ -179,7 +179,7 @@ namespace eet{
                             }
                         }
                     }
-                    std::cout << "There are " << buffers_.size() << " buffer in vector" << std::endl;
+                    std::cout << "There are " << buffers_.size() << " buffers in buffer vector" << std::endl;
                     std::cout << "Request a buffer of size : " << size << std::endl;
 
                     buffers_.emplace_back(size, dtype, options,name);
@@ -194,7 +194,7 @@ namespace eet{
                     return cache;
                 }
             }
-            std::cout << "There are " << cache_.size() << " buffer in cache vector" << std::endl;
+            std::cout << "There are " << cache_.size() << " caches in cache vector" << std::endl;
             std::cout << "Request a cache of size : " << size << std::endl;
 
             cache_.emplace_back(size, dtype, options,str);
