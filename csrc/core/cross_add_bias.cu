@@ -377,6 +377,58 @@ void QKV_transpose_opt_cross<half>(half* input, half* output, const int batch_si
     dst_ptr[target_id] = src_ptr[tid];
 }
 
+template<>
+__global__
+void Q_transpose_opt<nv_bfloat16>(nv_bfloat16* Q, nv_bfloat16* q_buf_, const int batch_size, const int seq_len, const int head_num, const int size_per_head)
+{
+    int tid = blockIdx.x * (size_per_head * head_num) + threadIdx.x + blockDim.x * blockIdx.y;
+    int batch_id = tid / (head_num * seq_len * size_per_head);
+    int seq_id = (tid % (head_num * seq_len * size_per_head)) / (head_num * size_per_head);
+    int head_id = (tid % (head_num * size_per_head)) / size_per_head;
+    int id = tid % size_per_head;
+    int target_id = target_index(batch_id, seq_id, head_id, id, batch_size, seq_len, head_num, size_per_head);
+
+    nv_bfloat162* src_ptr = (nv_bfloat162*)Q;
+    nv_bfloat162* dst_ptr = (nv_bfloat162*)q_buf_;
+    dst_ptr[target_id] = src_ptr[tid];
+}
+
+template <>
+__global__ void QKV_transpose_opt_cross<nv_bfloat16>(nv_bfloat16 *input, nv_bfloat16 *output, const int batch_size,
+                                                     const int seq_len, const int head_num, const int size_per_head, const int word_per_block)
+{
+    int tid = blockIdx.x * (size_per_head * head_num) + threadIdx.x + blockDim.x * blockIdx.y;
+    int batch_id = tid / (head_num * seq_len * size_per_head);
+    int seq_id = (tid % (head_num * seq_len * size_per_head)) / (head_num * size_per_head);
+    int head_id = (tid % (head_num * size_per_head)) / size_per_head;
+    int id = tid % size_per_head;
+    int target_id = target_index(batch_id, seq_id, head_id, id, batch_size, seq_len, head_num, size_per_head);
+
+    nv_bfloat162* src_ptr = (nv_bfloat162*)input;
+    nv_bfloat162* dst_ptr = (nv_bfloat162*)output;
+    dst_ptr[target_id] = src_ptr[tid];
+}
+
+template<>
+__global__
+void KV_transpose_opt<nv_bfloat16>(nv_bfloat16* K, nv_bfloat16* V, nv_bfloat16* k_buf_, nv_bfloat16* v_buf_, const int batch_size, const int seq_len, const int head_num, const int size_per_head)
+{
+    int tid = blockIdx.x * (size_per_head * head_num) + threadIdx.x + blockDim.x * blockIdx.y;
+    int batch_id = tid / (head_num * seq_len * size_per_head);
+    int seq_id = (tid % (head_num * seq_len * size_per_head)) / (head_num * size_per_head);
+    int head_id = (tid % (head_num * size_per_head)) / size_per_head;
+    int id = tid % size_per_head;
+    int target_id = target_index(batch_id, seq_id, head_id, id, batch_size, seq_len, head_num, size_per_head);
+
+    nv_bfloat162* src_ptr = (nv_bfloat162*)K;
+    nv_bfloat162* dst_ptr = (nv_bfloat162*)k_buf_;
+    dst_ptr[target_id] = src_ptr[tid];
+
+    src_ptr = (nv_bfloat162*)V;
+    dst_ptr = (nv_bfloat162*)v_buf_;
+    dst_ptr[target_id] = src_ptr[tid];
+}
+
 template<typename T>
 void add_QKV_bias_cross_opt_kernel(void* Q, const void* bias_Q, void* K, const void* bias_K, void* V, const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
                   const int& batch_size, const int& seq_len, const int& mem_seq_len,const int& head_num, const int& size_per_head, const cudaStream_t stream){
@@ -463,6 +515,8 @@ void add_QKV_bias_cross_opt_kernel(void* Q, const void* bias_Q, void* K, const v
 template void add_QKV_bias_cross_opt_kernel<float>(void* Q, const void* bias_Q, void* K, const void* bias_K, void* V, const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
                   const int& batch_size, const int& seq_len, const int& mem_seq_len,const int& head_num, const int& size_per_head, const cudaStream_t stream);
 template void add_QKV_bias_cross_opt_kernel<half>(void* Q, const void* bias_Q, void* K, const void* bias_K, void* V, const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
+                  const int& batch_size, const int& seq_len, const int& mem_seq_len,const int& head_num, const int& size_per_head, const cudaStream_t stream);
+template void add_QKV_bias_cross_opt_kernel<nv_bfloat16>(void* Q, const void* bias_Q, void* K, const void* bias_K, void* V, const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
                   const int& batch_size, const int& seq_len, const int& mem_seq_len,const int& head_num, const int& size_per_head, const cudaStream_t stream);
     
     

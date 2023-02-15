@@ -40,7 +40,9 @@
 #if (__CUDACC_VER_MAJOR__ >= 9)
     #include <cuda_fp16.h>
 #endif
-
+#if (__CUDACC_VER_MAJOR__ >= 11)
+    #include <cuda_bf16.h>
+#endif
 #include "util_macro.cuh"
 #include "util_arch.cuh"
 #include "util_namespace.cuh"

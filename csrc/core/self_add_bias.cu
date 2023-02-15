@@ -143,6 +143,8 @@ template void add_QKV_bias_opt_kernel<float>( void* Q, const void* bias_Q, void*
     const int& batch_size, const int& seq_len, const int& head_num, const int& size_per_head, const cudaStream_t stream);
 template void add_QKV_bias_opt_kernel<half>(void* Q, const void* bias_Q,  void* K, const void* bias_K, void* V, const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
     const int& batch_size, const int& seq_len, const int& head_num, const int& size_per_head, const cudaStream_t stream);
+template void add_QKV_bias_opt_kernel<nv_bfloat16>(void* Q, const void* bias_Q,  void* K, const void* bias_K, void* V, const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
+    const int& batch_size, const int& seq_len, const int& head_num, const int& size_per_head, const cudaStream_t stream);
 
 
 template<typename T>
@@ -299,6 +301,31 @@ void fused_QKV_transpose(half *QKV, half *q_buf_, half *k_buf_, half *v_buf_, co
     dst_ptr[target_id] = __ldg(&src_ptr[v_tid]);
 }
 
+__global__ 
+void fused_QKV_transpose(nv_bfloat16 *QKV, nv_bfloat16 *q_buf_, nv_bfloat16 *k_buf_, nv_bfloat16 *v_buf_, const int batch_size, const int seq_len, const int head_num, const int size_per_head)
+{
+    int tid = blockIdx.x * (size_per_head * head_num) + threadIdx.x + blockDim.x * blockIdx.y;
+    int batch_id = tid / (head_num * seq_len * size_per_head);
+    int seq_id = (tid % (head_num * seq_len * size_per_head)) / (head_num * size_per_head);
+    int head_id = (tid % (head_num * size_per_head)) / size_per_head;
+    int id = tid % size_per_head;
+    int target_id = target_index(batch_id, seq_id, head_id, id, batch_size, seq_len, head_num, size_per_head);
+
+    int q_tid = tid + 2 * batch_id * size_per_head * head_num * seq_len + 2 * seq_id * size_per_head * head_num;
+    int k_tid = tid + 2 * batch_id * size_per_head * head_num * seq_len + size_per_head * head_num + 2 * seq_id * size_per_head * head_num;
+    int v_tid = tid + 2 * batch_id * size_per_head * head_num * seq_len + 2 * size_per_head * head_num + 2 * seq_id * size_per_head * head_num;
+
+    nv_bfloat162 *src_ptr = (nv_bfloat162 *)QKV;
+    nv_bfloat162 *dst_ptr = (nv_bfloat162 *)q_buf_;
+    dst_ptr[target_id] = src_ptr[q_tid];
+
+    dst_ptr = (nv_bfloat162 *)k_buf_;
+    dst_ptr[target_id] = src_ptr[k_tid];
+
+    dst_ptr = (nv_bfloat162 *)v_buf_;
+    dst_ptr[target_id] = src_ptr[v_tid];
+}
+
 template<typename T>
 void fused_add_QKV_bias_kernel( void* QKV, const void* bias_Q,  const void* bias_K,  const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
                   const int& batch_size, const int& seq_len, const int& head_num, const int& size_per_head, const cudaStream_t stream){
@@ -348,19 +375,25 @@ void fused_add_QKV_bias_kernel( void* QKV, const void* bias_Q,  const void* bias
             grid.x = m;
             grid.y = fold_coeff;
             block.x = k / (2 * fold_coeff);
-            if (is_add_bias) {
-                fused_add_QKV_bias<<<grid, block, 0, stream>>>((half *)QKV, (half *)bias_Q, (half *)bias_K, (half *)bias_V, (half *)q_buf_, (half *)k_buf_,
-                                                               (half *)v_buf_, batch_size, seq_len, head_num, size_per_head / 2);
-            } else {
-                fused_QKV_transpose<<<grid, block, 0, stream>>>((half *)QKV, (half *)q_buf_, (half *)k_buf_, (half *)v_buf_, batch_size, seq_len, head_num, size_per_head / 2);
+            if (std::is_same<T, half>::value) {         // half
+                if (is_add_bias) {
+                    fused_add_QKV_bias<<<grid, block, 0, stream>>>((half *)QKV, (half *)bias_Q, (half *)bias_K, (half *)bias_V, (half *)q_buf_, (half *)k_buf_,
+                                                                   (half *)v_buf_, batch_size, seq_len, head_num, size_per_head / 2);
+                } else {
+                    fused_QKV_transpose<<<grid, block, 0, stream>>>((half *)QKV, (half *)q_buf_, (half *)k_buf_, (half *)v_buf_, batch_size, seq_len, head_num, size_per_head / 2);
+                }
+            } else {                                    // bfloat16 only support for t5
+                fused_QKV_transpose<<<grid, block, 0, stream>>>((nv_bfloat16 *)QKV, (nv_bfloat16 *)q_buf_, (nv_bfloat16 *)k_buf_, (nv_bfloat16 *)v_buf_, batch_size, seq_len, head_num, size_per_head / 2);
             }
     }
 
 }
 
-template void fused_add_QKV_bias_kernel<float>( void* QKV, const void* bias_Q,  const void* bias_K,  const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
-                  const int& batch_size, const int& seq_len, const int& head_num, const int& size_per_head, const cudaStream_t stream);
+template void fused_add_QKV_bias_kernel<float>(void *QKV, const void *bias_Q, const void *bias_K, const void *bias_V, void *q_buf_, void *k_buf_, void *v_buf_,
+                                               const int &batch_size, const int &seq_len, const int &head_num, const int &size_per_head, const cudaStream_t stream);
 
-template void fused_add_QKV_bias_kernel<half>( void* QKV, const void* bias_Q,  const void* bias_K,  const void* bias_V, void* q_buf_, void* k_buf_, void* v_buf_,
-                  const int& batch_size, const int& seq_len, const int& head_num, const int& size_per_head, const cudaStream_t stream);
+template void fused_add_QKV_bias_kernel<half>(void *QKV, const void *bias_Q, const void *bias_K, const void *bias_V, void *q_buf_, void *k_buf_, void *v_buf_,
+                                              const int &batch_size, const int &seq_len, const int &head_num, const int &size_per_head, const cudaStream_t stream);
 
+template void fused_add_QKV_bias_kernel<nv_bfloat16>(void *QKV, const void *bias_Q, const void *bias_K, const void *bias_V, void *q_buf_, void *k_buf_, void *v_buf_,
+                                                     const int &batch_size, const int &seq_len, const int &head_num, const int &size_per_head, const cudaStream_t stream);

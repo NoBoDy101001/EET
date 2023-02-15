@@ -28,10 +28,27 @@ def get_cuda_bare_metal_version(cuda_dir):
 
 _, bare_metal_major, _ = get_cuda_bare_metal_version(cpp_extension.CUDA_HOME)
 if int(bare_metal_major) == 11:
-    os.environ["TORCH_CUDA_ARCH_LIST"] = "6.0;6.1;6.2;7.0;7.5;8.0"
+    os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
 else:
     os.environ["TORCH_CUDA_ARCH_LIST"] = "6.0;6.1;6.2;7.0;7.5"
 
+nvcc_args = [
+    '-O3',
+    '--use_fast_math',
+    '-U__CUDA_NO_HALF_OPERATORS__', 
+    '-U__CUDA_NO_HALF_CONVERSIONS__',
+    '-U__CUDA_NO_HALF2_OPERATORS__',
+    '-U__CUDA_NO_HALF2_CONVERSIONS__',
+    "-U__CUDA_NO_BFLOAT16_OPERATORS__",
+    "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
+    "-U__CUDA_NO_BFLOAT162_OPERATORS__",
+    "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
+    # '-gencode=arch=compute_86,code=sm_86',
+    # '-gencode=arch=compute_80,code=sm_80',
+    # '-gencode=arch=compute_70,code=sm_70',
+    # '-gencode=arch=compute_61,code=sm_61',
+    # '-gencode=arch=compute_60,code=sm_60',
+]
 
 setup(
     name='EET',
@@ -46,9 +63,7 @@ setup(
             sources=sources,
             include_dirs=include_paths,
             extra_compile_args={'cxx': ['-g'],
-                                'nvcc': ['-U__CUDA_NO_HALF_OPERATORS__', 
-                                         '-U__CUDA_NO_HALF_CONVERSIONS__',
-                                         '-U__CUDA_NO_HALF2_OPERATORS__']},
+                                'nvcc': nvcc_args},
             define_macros=[('VERSION_INFO', __version__)]
             )
         ],

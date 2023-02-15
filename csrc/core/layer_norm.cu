@@ -1,6 +1,7 @@
 #include "core/common.cuh"
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <iostream>
 #include <assert.h>
 #include <stdio.h>  
@@ -446,6 +447,70 @@ __global__ void decoder_norm1_kernel_opt(const half *__restrict input,
 }
 
 template <int item_per_thread>
+__global__ void decoder_norm1_kernel_opt(const nv_bfloat16 *__restrict input,
+                                         const nv_bfloat16 *__restrict gamma,
+                                         const nv_bfloat16 *__restrict beta,
+                                         nv_bfloat16 *output,
+                                         int m, int n)
+{
+  const int tid = threadIdx.x;
+  __shared__ float s_mean;
+  __shared__ float s_variance;
+  float mean = 0.0f;
+  float variance = 0.0f;
+  float2 local_out_fp2[item_per_thread];
+
+  const nv_bfloat162 *input_ptr = (const nv_bfloat162 *)input;
+  const nv_bfloat162 *gamma_ptr = (const nv_bfloat162 *)gamma;
+  const nv_bfloat162 *beta_ptr = (const nv_bfloat162 *)beta;
+  nv_bfloat162 *output_ptr = (nv_bfloat162 *)output;
+
+  float local_out[item_per_thread];
+
+  for (int i = 0; i < item_per_thread; i++)
+  {
+    local_out[i] = 0.0f;
+  }
+
+  for (int i = 0; i < item_per_thread; i++)
+  {
+    local_out_fp2[i] = (tid * item_per_thread + i) < n ? __bfloat1622float2((__ldg(&input_ptr[blockIdx.x * (n >> 1) + tid * item_per_thread + i]))) : make_float2(0.0f, 0.0f);
+    local_out[i] += local_out_fp2[i].x;
+    local_out[i] += local_out_fp2[i].y;
+  }
+
+  mean = blockReduceSum_opt<float, item_per_thread>(local_out);
+  if (tid == 0)
+    s_mean = mean / n;
+  __syncthreads();
+
+  float tmp[item_per_thread];
+  for (int i = 0; i < item_per_thread; i++)
+  {
+    tmp[i] = (tid * item_per_thread + i) < n ? (local_out_fp2[i].x - s_mean) * (local_out_fp2[i].x - s_mean) +
+                                                   (local_out_fp2[i].y - s_mean) * (local_out_fp2[i].y - s_mean)
+                                             : 0.0f;
+  }
+
+  variance = blockReduceSum_opt<float, item_per_thread>(tmp);
+  if (tid == 0)
+    s_variance = rsqrtf(variance / n + 1e-6);
+  __syncthreads();
+
+  for (int i = 0; i < item_per_thread; i++)
+  {
+    if (tid * item_per_thread + i < n)
+    {
+      float2 gamma_val = __bfloat1622float2(__ldg(&gamma_ptr[tid * item_per_thread + i]));
+      float2 beta_val = __bfloat1622float2(__ldg(&beta_ptr[tid * item_per_thread + i]));
+      local_out_fp2[i].x = (local_out_fp2[i].x - s_mean) * s_variance * gamma_val.x + beta_val.x;
+      local_out_fp2[i].y = (local_out_fp2[i].y - s_mean) * s_variance * gamma_val.y + beta_val.y;
+      output_ptr[blockIdx.x * (n >> 1) + tid * item_per_thread + i] = __float22bfloat162_rn(local_out_fp2[i]);
+    }
+  }
+}
+
+template <int item_per_thread>
 __global__ void T5norm1_kernel_opt(const float *__restrict input,
                                    const float *__restrict gamma,
                                    float *output,
@@ -526,6 +591,49 @@ __global__ void T5norm1_kernel_opt(const half *__restrict input,
       local_out_fp2[i].x = local_out_fp2[i].x * s_variance * gamma_val.x;
       local_out_fp2[i].y = local_out_fp2[i].y * s_variance * gamma_val.y;
       output_ptr[blockIdx.x * (n >> 1) + tid * item_per_thread + i] = __float22half2_rn(local_out_fp2[i]);
+    }
+  }
+}
+
+template <int item_per_thread>
+__global__ void T5norm1_kernel_opt(const nv_bfloat16 *__restrict input,
+                                   const nv_bfloat16 *__restrict gamma,
+                                   nv_bfloat16 *output,
+                                   int m, int n)
+{
+  const int tid = threadIdx.x;
+  __shared__ float s_variance;
+  float variance = 0.0f;
+  float2 local_out_fp2[item_per_thread];
+
+  const nv_bfloat162 *input_ptr = (const nv_bfloat162 *)input;
+  const nv_bfloat162 *gamma_ptr = (const nv_bfloat162 *)gamma;
+  nv_bfloat162 *output_ptr = (nv_bfloat162 *)output;
+
+  for (int i = 0; i < item_per_thread; i++)
+  {
+    local_out_fp2[i] = (tid * item_per_thread + i) < n ? __bfloat1622float2(input_ptr[blockIdx.x * (n >> 1) + tid * item_per_thread + i]) : make_float2(0.0f, 0.0f);
+  }
+
+  float tmp[item_per_thread];
+  for (int i = 0; i < item_per_thread; i++)
+  {
+    tmp[i] = (tid * item_per_thread + i) < n ? local_out_fp2[i].x * local_out_fp2[i].x + local_out_fp2[i].y * local_out_fp2[i].y : 0.0f;
+  }
+
+  variance = blockReduceSum_opt<float, item_per_thread>(tmp);
+  if (tid == 0)
+    s_variance = rsqrtf(variance / n + 1e-6);
+  __syncthreads();
+
+  for (int i = 0; i < item_per_thread; i++)
+  {
+    if (tid * item_per_thread + i < n)
+    {
+      float2 gamma_val = __bfloat1622float2(gamma_ptr[tid * item_per_thread + i]);
+      local_out_fp2[i].x = local_out_fp2[i].x * s_variance * gamma_val.x;
+      local_out_fp2[i].y = local_out_fp2[i].y * s_variance * gamma_val.y;
+      output_ptr[blockIdx.x * (n >> 1) + tid * item_per_thread + i] = __float22bfloat162_rn(local_out_fp2[i]);
     }
   }
 }
@@ -677,12 +785,22 @@ template void add_bias_input_layernorm_kernel<half>(void *output, const void *in
                                                     const void *beta, const int &m, int &n,
                                                     const cudaStream_t stream);
 
+template void add_bias_input_layernorm_kernel<nv_bfloat16>(void *output, const void *input,
+                                                           const void *bias, const void *gamma,
+                                                           const void *beta, const int &m, int &n,
+                                                           const cudaStream_t stream);
+
 template void layernorm<float>(const void *input, const void *gamma,
                                const void *beta, void *output, const int &m, const int &n, const cudaStream_t stream);
 
 template void layernorm<half>(const void *input, const void *gamma,
                               const void *beta, void *output, const int &m, const int &n, const cudaStream_t stream);
 
+template void layernorm<nv_bfloat16>(const void *input, const void *gamma,
+                                     const void *beta, void *output, const int &m, const int &n, const cudaStream_t stream);
+
 template void T5layernorm<float>(const void *input, const void *gamma, void *output, const int &m, const int &n, const cudaStream_t stream);
 
 template void T5layernorm<half>(const void *input, const void *gamma, void *output, const int &m, const int &n, const cudaStream_t stream);
+
+template void T5layernorm<nv_bfloat16>(const void *input, const void *gamma, void *output, const int &m, const int &n, const cudaStream_t stream);

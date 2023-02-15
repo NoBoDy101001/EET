@@ -5,6 +5,7 @@
 #include <torch/extension.h>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <cublas_v2.h>
 #include "opbase.h"
 
@@ -62,7 +63,16 @@ void check(T result, char const *const func, const char *const file, int const l
 
 #define check_cuda_error(val) check((val), #val, __FILE__, __LINE__)
 
-#define RUN_KERNEL(FUNCTION,DTYPE,...)                        \
+#define RUN_KERNEL(FUNCTION,DTYPE,...)                       \
+  if (DTYPE == torch::kBFloat16) {                            \
+    FUNCTION<nv_bfloat16>(__VA_ARGS__);                       \
+  } else if (DTYPE == torch::kFloat32) {                      \
+    FUNCTION<float>(__VA_ARGS__);                             \
+  } else {                                                    \
+    FUNCTION<half>(__VA_ARGS__);                              \
+  }                                                           \
+
+#define RUN_KERNEL1(FUNCTION,DTYPE,...)                        \
   if (DTYPE == torch::kFloat32) {                             \
     FUNCTION<float>(__VA_ARGS__);                             \
   } else {                                                    \

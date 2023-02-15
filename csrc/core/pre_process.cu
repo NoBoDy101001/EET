@@ -1,5 +1,6 @@
 #include "core/common.cuh"
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <thrust/fill.h>
 #include <cuda_runtime.h>
 #include <thrust/reduce.h>

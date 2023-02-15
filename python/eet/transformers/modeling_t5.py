@@ -469,10 +469,7 @@ class EETT5Model():
                                    max_prompt_seq_len, max_full_seq_len, data_type, device, False,
                                    activation_fn)
 
-        if data_type==torch.float16:
-            torch_model = torch_model.half()
-        else:
-            torch_model = torch_model.float()
+        torch_model = torch_model.to(data_type)
 
         shared = torch_model.shared.cuda()
         encoder_final_layernorm = torch_model.encoder.final_layer_norm.cuda()
@@ -527,10 +524,7 @@ class EETT5Model():
                                    max_prompt_seq_len, max_full_seq_len, data_type, device, False,
                                    activation_fn)
 
-        if data_type==torch.float16:
-            torch_model = torch_model.half()
-        else:
-            torch_model = torch_model.float()
+        torch_model = torch_model.to(data_type)
 
         shared = torch_model.shared.cuda()
         encoder_final_layernorm = torch_model.encoder.final_layer_norm.cuda()

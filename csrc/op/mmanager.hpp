@@ -3,6 +3,7 @@
 #include "op/common.hpp"
 #include "vector"
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <unordered_map>
 
 #define MAX_BUFFER_SIZE 100
@@ -162,6 +163,9 @@ namespace eet{
                              itemsize = 4;
                              break;
                          case torch::kFloat16:
+                             itemsize = 2;
+                             break;
+                         case torch::kBFloat16:
                              itemsize = 2;
                              break;
                              //TODO

@@ -49,7 +49,7 @@ namespace eet
             // printf("step:%d\n",step_);
             Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, emb_cache_name_);
 
-            RUN_KERNEL(embedding_lookup_kernel, desc_.dtype_,embedding_weights_, input_ids,output.data_ptr(),
+            RUN_KERNEL1(embedding_lookup_kernel, desc_.dtype_,embedding_weights_, input_ids,output.data_ptr(),
                         embedding_num, desc_.hidden_units_, desc_.stream,/*acc=*/false,/*ratio=*/1,no_scale_embedding);
             
             
@@ -59,7 +59,7 @@ namespace eet
             #endif
             int m = embedding_num;
             int n = desc_.hidden_units_;
-            RUN_KERNEL(position_encoding_kernel, desc_.dtype_,output.data_ptr(),positions,
+            RUN_KERNEL1(position_encoding_kernel, desc_.dtype_,output.data_ptr(),positions,
                         cur_seq_len_,step_, padding_idx,m , n, desc_.stream);
 
             #ifdef _DEBUG_MODE_
@@ -116,7 +116,7 @@ namespace eet
             bool no_scale_embedding = true;
             // embedding
             const int64_t *input_ids = input_tensor.data_ptr<int64_t>();
-            RUN_KERNEL(embedding_lookup_kernel, desc_.dtype_,embedding_weights_, input_ids,embedding_out,
+            RUN_KERNEL1(embedding_lookup_kernel, desc_.dtype_,embedding_weights_, input_ids,embedding_out,
                     embedding_num, desc_.hidden_units_, desc_.stream,/*acc=*/false,1,no_scale_embedding);
 
             
@@ -127,12 +127,12 @@ namespace eet
                 tensor_row = token_type_ids.sizes()[1];
                 int token_num = tensor_col * tensor_row;
                 int token_type_ratio = embedding_num / token_num;
-                RUN_KERNEL(embedding_lookup_kernel, desc_.dtype_,token_type_weights_, token_type,embedding_out,
+                RUN_KERNEL1(embedding_lookup_kernel, desc_.dtype_,token_type_weights_, token_type,embedding_out,
                         token_num, desc_.hidden_units_, desc_.stream,/*acc=*/true,token_type_ratio,no_scale_embedding);
             }
 
             const int64_t *position = position_ids.data_ptr<int64_t>();
-            RUN_KERNEL(embedding_lookup_kernel, desc_.dtype_,position_weights_, position,embedding_out,
+            RUN_KERNEL1(embedding_lookup_kernel, desc_.dtype_,position_weights_, position,embedding_out,
                     position_num, desc_.hidden_units_, desc_.stream,/*acc=*/true,position_ratio,no_scale_embedding);
 
 
@@ -146,7 +146,7 @@ namespace eet
         {
             const int m = cur_batch_size_ * cur_seq_len_;
             int n = desc_.hidden_units_;
-            RUN_KERNEL(layernorm,desc_.dtype_,input.data_ptr(),layernorm_weights_,layernorm_bias_,out.data_ptr(), m, n, desc_.stream);
+            RUN_KERNEL1(layernorm,desc_.dtype_,input.data_ptr(),layernorm_weights_,layernorm_bias_,out.data_ptr(), m, n, desc_.stream);
 #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
             check_cuda_error(cudaGetLastError());

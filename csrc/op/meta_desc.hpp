@@ -33,14 +33,16 @@ class MetaDesc{
         options_ = torch::TensorOptions().dtype(dtype_).device(cuda_device).requires_grad(requires_grad);
         switch(dtype_){
             case torch::kFloat32:
+                dataType_ = CUDA_R_32F;
                 computeType_ = CUDA_R_32F;
                 break;
             case torch::kFloat16:
-                computeType_ = CUDA_R_16F;
+                dataType_ = CUDA_R_16F;
+                computeType_ = CUDA_R_16F; 
                 break;
-            //TODO    
             case torch::kBFloat16:
-                computeType_ = CUDA_R_16BF;
+                dataType_ = CUDA_R_16BF;
+                computeType_ = CUDA_R_32F;
                 break;
             case torch::kInt8:
                 break;
@@ -76,10 +78,16 @@ class MetaDesc{
         options_ = torch::TensorOptions().dtype(dtype_).device(cuda_device).requires_grad(requires_grad);
         switch(dtype_){
             case torch::kFloat32:
+                dataType_ = CUDA_R_32F;
                 computeType_ = CUDA_R_32F;
                 break;
             case torch::kFloat16:
-                computeType_ = CUDA_R_16F;
+                dataType_ = CUDA_R_16F;
+                computeType_ = CUDA_R_16F; 
+                break;
+            case torch::kBFloat16:
+                dataType_ = CUDA_R_16BF;
+                computeType_ = CUDA_R_32F;
                 break;
                 //TODO
             case torch::kInt8:
@@ -110,8 +118,9 @@ class MetaDesc{
     int layer_num_;
     std::string activation_fn_;
     torch::TensorOptions options_;
-    cudaDataType_t computeType_;
-    c10::ScalarType dtype_;
+    cudaDataType_t dataType_;       // cuda dtype
+    cudaDataType_t computeType_;    // cuda dtype
+    c10::ScalarType dtype_;         // torch dtype
 
     static cublasHandle_t cublasHandle;
     static cudaStream_t stream;
@@ -120,12 +129,12 @@ class MetaDesc{
     void is_available(){
         assert(batch_size_ > 0 && "batch size must > 0");
         assert(head_num_ > 0 && "head_num must > 0");
-        assert(hidden_units_ % head_num_ == 0 && " hidden_units must a multiple of head_num");
+        assert(hidden_units_ % head_num_ == 0 && " hidden_units must a multiple of head_num");      // TODO not necessary
         assert(layer_num_ > 0 && "layer_num must > 0");
         assert(max_seq_len_ > 0 && "max_seq_len must > 0");
         assert(max_full_seq_len_ > 0 && "max_seq_len must > 0");
         assert((options_.dtype() == torch::kFloat32 || options_.dtype() == torch::kFloat16 ||
-        options_.dtype() == torch::kInt8) && "EET now only support float / half / int8" );
+        options_.dtype() == torch::kInt8) && "EET now only support float / half / bfloat16 / int8" );
         assert(options_.device().is_cuda() && "EET now only support CUDA");
         assert(options_.requires_grad() == false && "EET now only support inference");
     }

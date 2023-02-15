@@ -1,4 +1,5 @@
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <iostream>
 #include <cuda_runtime.h>
 #include "core/common.cuh"
@@ -172,7 +173,9 @@ void softmax_kernel(void *qk_buf_, const int64_t *__restrict padding_index, cons
   }
 }
 
-template void softmax_kernel<float>(void *qk_buf_, const int64_t* padding_index,const int& batch_size, 
-                                      const int& head_num, const int& seq_len, const cudaStream_t stream);
-template void softmax_kernel<half>(void *qk_buf_, const int64_t* padding_index, const int& batch_size, 
-                                      const int& head_num, const int& seq_len, const cudaStream_t stream);
+template void softmax_kernel<float>(void *qk_buf_, const int64_t *padding_index, const int &batch_size,
+                                    const int &head_num, const int &seq_len, const cudaStream_t stream);
+template void softmax_kernel<half>(void *qk_buf_, const int64_t *padding_index, const int &batch_size,
+                                   const int &head_num, const int &seq_len, const cudaStream_t stream);
+template void softmax_kernel<nv_bfloat16>(void *qk_buf_, const int64_t *padding_index, const int &batch_size,
+                                          const int &head_num, const int &seq_len, const cudaStream_t stream);

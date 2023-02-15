@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <iostream>
 // constants for approximating the normal cdf
 // gelu ->gelu_fast
@@ -52,6 +53,33 @@ void add_bias_gelu<half>(half* out, const half* bias, int m, int n)
   }
 }
 
+template <>
+__global__
+void add_bias_gelu<nv_bfloat16>(nv_bfloat16* out, const nv_bfloat16* bias, int m, int n)
+{
+  const nv_bfloat162 A2 = __floats2bfloat162_rn(A, A);
+  const nv_bfloat162 B2 = __floats2bfloat162_rn(B, B);
+  const nv_bfloat162 C2 = __floats2bfloat162_rn(C, C);
+
+  nv_bfloat162 * out_ptr = (nv_bfloat162 *)out;
+  nv_bfloat162 * bias_ptr = (nv_bfloat162 *)bias;
+
+  int idx = n * blockIdx.x + blockIdx.y * blockDim.x + threadIdx.x;
+  int bias_idx = blockIdx.y * blockDim.x + threadIdx.x;
+
+  if (idx < m * n){
+    nv_bfloat162 in = out_ptr[idx];
+    if (bias_ptr != nullptr) {
+      in += bias_ptr[bias_idx];
+    }
+    nv_bfloat162 tmp = in * (C2 * in * in + B2);
+    float x = tanh(__bfloat162float(tmp.x));
+    float y = tanh(__bfloat162float(tmp.y));
+    nv_bfloat162 cdf = A2 + A2 * make_bfloat162(x, y);
+    out_ptr[idx] = in * cdf;
+  }
+}
+
 template <typename T>
 __global__
 void gated_gelu(T* inner_gelu, T* inner_linear, int m, int n)
@@ -86,6 +114,30 @@ void gated_gelu<half>(half* inner_gelu, half* inner_linear, int m, int n)
     float x = tanh(__half2float(tmp.x));
     float y = tanh(__half2float(tmp.y));
     half2 cdf = A2 + A2 * make_half2(x, y);
+    inner_gelu_ptr[idx] = in1 * cdf * in2;
+  }
+}
+
+template <>
+__global__
+void gated_gelu<nv_bfloat16>(nv_bfloat16* inner_gelu, nv_bfloat16* inner_linear, int m, int n)
+{
+  const nv_bfloat162 A2 = __floats2bfloat162_rn(A, A);
+  const nv_bfloat162 B2 = __floats2bfloat162_rn(B, B);
+  const nv_bfloat162 C2 = __floats2bfloat162_rn(C, C);
+
+  nv_bfloat162 * inner_gelu_ptr = (nv_bfloat162 *)inner_gelu;
+  nv_bfloat162 * inner_linear_ptr = (nv_bfloat162 *)inner_linear;
+
+  int idx = n * blockIdx.x + blockIdx.y * blockDim.x + threadIdx.x;
+
+  if (idx < m * n){
+    nv_bfloat162 in1 = inner_gelu_ptr[idx];
+    nv_bfloat162 in2 = inner_linear_ptr[idx];
+    nv_bfloat162 tmp = in1 * (C2 * in1 * in1 + B2);
+    float x = tanh(__bfloat162float(tmp.x));
+    float y = tanh(__bfloat162float(tmp.y));
+    nv_bfloat162 cdf = A2 + A2 * make_bfloat162(x, y);
     inner_gelu_ptr[idx] = in1 * cdf * in2;
   }
 }
@@ -126,9 +178,31 @@ void add_bias_quick_gelu(half* out, const half* bias, int m, int n)
       in += bias_ptr[bias_idx];
     }
     half2 tmp = __hmul2(D2, in);
-    float x = __expf(__half2float(-tmp.x));
-    float y = __expf(__half2float(-tmp.y));
-    half2 cdf = __h2div(half_one2, half_one2 + make_half2(x, y));
+    half2 cdf = __h2div(half_one2, half_one2 + h2exp(-tmp));
+    out_ptr[idx] = __hmul2(in, cdf);
+  }
+}
+
+template <>
+__global__
+void add_bias_quick_gelu(nv_bfloat16* out, const nv_bfloat16* bias, int m, int n)
+{
+  const nv_bfloat162 D2 = __floats2bfloat162_rn(D, D);
+  const nv_bfloat162 bf_one2 = __floats2bfloat162_rn(1.0f, 1.0f);
+
+  nv_bfloat162 *out_ptr = (nv_bfloat162 *)out;
+  nv_bfloat162 *bias_ptr = (nv_bfloat162 *)bias;
+
+  int idx = n * blockIdx.x + blockIdx.y * blockDim.x + threadIdx.x;
+  int bias_idx = blockIdx.y * blockDim.x + threadIdx.x;
+
+  if (idx < m * n) {
+    nv_bfloat162 in = out_ptr[idx];
+    if (bias_ptr != nullptr) {
+      in += bias_ptr[bias_idx];
+    }
+    nv_bfloat162 tmp = __hmul2(D2, in);
+    nv_bfloat162 cdf = __h2div(bf_one2, bf_one2 + h2exp(-tmp));
     out_ptr[idx] = __hmul2(in, cdf);
   }
 }
@@ -145,7 +219,7 @@ void add_bias_relu(T* out, const T* bias, int m, int n)
         if (bias != nullptr) {
           val += bias[bias_idx];
         }
-        out[idx] = (T)(val > 0.0f ? val : 0.0f);
+        out[idx] = val > (T)0.0f ? val : (T)0.0f;
     }
 }
 
@@ -294,5 +368,7 @@ void gated_gelu_kernel(void* inner_gelu, void* inner_linear, int m, int n , cons
 
 template void add_bias_act_kernel<float>(void* ffn_inner, const void* bias, const int m, const int n, const int act_type, const cudaStream_t stream);
 template void add_bias_act_kernel<half>(void* ffn_inner, const void* bias, const int m, const int n, const int act_type, const cudaStream_t stream);
+template void add_bias_act_kernel<nv_bfloat16>(void* ffn_inner, const void* bias, const int m, const int n, const int act_type, const cudaStream_t stream);
 template void gated_gelu_kernel<float>(void* inner_gelu, void* inner_linear, int m, int n , const int act_type ,const cudaStream_t stream);
 template void gated_gelu_kernel<half>(void* inner_gelu, void* inner_linear, int m, int n , const int act_type ,const cudaStream_t stream);
+template void gated_gelu_kernel<nv_bfloat16>(void* inner_gelu, void* inner_linear, int m, int n , const int act_type ,const cudaStream_t stream);

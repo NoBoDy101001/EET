@@ -1,6 +1,7 @@
 #include "core/common.cuh"
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 
 // bert softmax code modified from Nvidia's DeepLearningExamples
 // https://github.com/NVIDIA/DeepLearningExamples/blob/master/FasterTransformer/v3.1/fastertransformer/cuda/open_attention.cu#L1399-L1583
@@ -21,7 +22,7 @@ __global__ void softmax_kernel_bert(T *qk_buf, const int64_t *padding_len, const
 
   for (int i = 0; i < seq_len - right_padding_len; ++i)
   {
-    float qk = threadIdx.x < seq_len ? (float)qk_buf[threadIdx.x + qk_offset] : 0.0f;
+    float qk = threadIdx.x < seq_len ? static_cast<float>(qk_buf[threadIdx.x + qk_offset]) : 0.0f;
     float padding_val = (threadIdx.x >= seq_len - right_padding_len) ? -1e20f : 0.0f;
 
     float tmp = threadIdx.x < seq_len ? (float)(qk + padding_val) : -1e20f;
@@ -50,7 +51,7 @@ __global__ void softmax_kernel_bert(T *qk_buf, const int64_t *padding_len, const
   for (int i = seq_len - right_padding_len; i < seq_len; ++i)
   {
     if (threadIdx.x < seq_len)
-      qk_buf[threadIdx.x + qk_offset] = 0.0f;
+      qk_buf[threadIdx.x + qk_offset] = (T)0.0f;
     qk_offset += seq_len;
   }
 }
@@ -69,7 +70,7 @@ __global__ void softmax_kernel_bert_opt(T *qk_buf, const int64_t *padding_len, c
 
   __shared__ float s_sum, s_max;
 
-  float qk = threadIdx.x < seq_len ? (float)qk_buf[threadIdx.x + qk_offset] : 0.0f;
+  float qk = threadIdx.x < seq_len ? static_cast<float>(qk_buf[threadIdx.x + qk_offset]) : 0.0f;
 
   float tmp = threadIdx.x < seq_len - right_padding_len ? (float)(qk) : -1e20f;
   float max_val = blockReduceMax<float>(tmp);
@@ -106,7 +107,7 @@ __global__ void softmax_kernel_v2(T *qk_buf, const int64_t *padding_len, const i
 
   for (int i = 0; i < seq_len - right_padding_len; ++i)
   {
-    float qk = threadIdx.x < seq_len ? (float)qk_buf[threadIdx.x + qk_offset] : 0.0f;
+    float qk = threadIdx.x < seq_len ? static_cast<float>(qk_buf[threadIdx.x + qk_offset]) : 0.0f;
     float padding_val = (threadIdx.x > i || threadIdx.x >= seq_len - right_padding_len) ? -1e20f : 0.0f;
 
     float tmp = threadIdx.x < seq_len ? (float)(qk + padding_val) : -1e20f;
@@ -135,7 +136,7 @@ __global__ void softmax_kernel_v2(T *qk_buf, const int64_t *padding_len, const i
   for (int i = seq_len - right_padding_len; i < seq_len; ++i)
   {
     if (threadIdx.x < seq_len)
-      qk_buf[threadIdx.x + qk_offset] = 0.0f;
+      qk_buf[threadIdx.x + qk_offset] = (T)0.0f;
     qk_offset += seq_len;
   }
 }
@@ -158,7 +159,7 @@ __global__ void softmax_kernel_t5(T *qk_buf, T *position_bias, const int64_t *pa
 
   for (int i = 0; i < seq_len - right_padding_len; ++i)
   {
-    float qk = threadIdx.x < seq_len ? (float)qk_buf[threadIdx.x + qk_offset] + (float)position_bias[threadIdx.x + bias_offset] : 0.0f;
+    float qk = threadIdx.x < seq_len ? static_cast<float>(qk_buf[threadIdx.x + qk_offset]) + static_cast<float>(position_bias[threadIdx.x + bias_offset]) : 0.0f;
     float padding_val = (threadIdx.x >= seq_len - right_padding_len) ? -1e20f : 0.0f;
 
     float tmp = threadIdx.x < seq_len ? (float)(qk + padding_val) : -1e20f;
@@ -188,7 +189,7 @@ __global__ void softmax_kernel_t5(T *qk_buf, T *position_bias, const int64_t *pa
   for (int i = seq_len - right_padding_len; i < seq_len; ++i)
   {
     if (threadIdx.x < seq_len)
-      qk_buf[threadIdx.x + qk_offset] = 0.0f;
+      qk_buf[threadIdx.x + qk_offset] = (T)0.0f;
     qk_offset += seq_len;
     bias_offset += seq_len;
   }
@@ -209,7 +210,7 @@ __global__ void softmax_kernel_t5_opt(T *qk_buf, T *position_bias, const int64_t
 
   __shared__ float s_sum, s_max;
 
-  float qk = threadIdx.x < seq_len ? (float)qk_buf[threadIdx.x + qk_offset] + (float)position_bias[threadIdx.x + bias_offset] : 0.0f;
+  float qk = threadIdx.x < seq_len ? static_cast<float>(qk_buf[threadIdx.x + qk_offset]) + static_cast<float>(position_bias[threadIdx.x + bias_offset]) : 0.0f;
 
   float tmp = threadIdx.x < seq_len - right_padding_len ? (float)(qk) : -1e20f;
   float max_val = blockReduceMax<float>(tmp);
@@ -273,7 +274,9 @@ void bert_softmax_kernel(void *qk_buf, void* position_bias, const int64_t *paddi
   }
 }
 
-template void bert_softmax_kernel<float>(void *qk_buf, void* position_bias, const int64_t *padding_len, const int &batch_size,
+template void bert_softmax_kernel<float>(void *qk_buf, void *position_bias, const int64_t *padding_len, const int &batch_size,
                                          const int &head_num, const int &seq_len, bool need_sequence_mask, const cudaStream_t stream);
-template void bert_softmax_kernel<half>(void *qk_buf, void* position_bias, const int64_t *padding_len, const int &batch_size,
+template void bert_softmax_kernel<half>(void *qk_buf, void *position_bias, const int64_t *padding_len, const int &batch_size,
                                         const int &head_num, const int &seq_len, bool need_sequence_mask, const cudaStream_t stream);
+template void bert_softmax_kernel<nv_bfloat16>(void *qk_buf, void *position_bias, const int64_t *padding_len, const int &batch_size,
+                                               const int &head_num, const int &seq_len, bool need_sequence_mask, const cudaStream_t stream);

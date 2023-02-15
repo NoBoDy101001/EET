@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "core/common.cuh"
 #include <assert.h>
 
@@ -33,6 +34,25 @@ void transpose(half* src, half* dst,
   int target_id = target_index(batch_id, head_id, seq_id, id, batch_size, head_num, seq_len, size_per_head);
   half2* src_ptr = (half2*)src;
   half2* dst_ptr = (half2*)dst;
+
+  dst_ptr[target_id] = src_ptr[tid];
+}
+
+template<>
+  __global__
+void transpose(nv_bfloat16* src, nv_bfloat16* dst,
+    const int batch_size, const int seq_len, const int head_num, const int size_per_head)
+{
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  int batch_id = tid / (head_num * seq_len * size_per_head);
+  int head_id = (tid % (head_num * seq_len * size_per_head)) / (seq_len * size_per_head);
+  int seq_id = (tid % (seq_len * size_per_head)) / size_per_head;
+  int id = tid % size_per_head;
+
+  int target_id = target_index(batch_id, head_id, seq_id, id, batch_size, head_num, seq_len, size_per_head);
+  nv_bfloat162* src_ptr = (nv_bfloat162*)src;
+  nv_bfloat162* dst_ptr = (nv_bfloat162*)dst;
 
   dst_ptr[target_id] = src_ptr[tid];
 }
@@ -133,18 +153,23 @@ void copyKV_transpose_cross_kernel(void* d_K_buf, void* d_V_buf,void* K_buf,
             mem_seq_len, batch_size, head_num);
 }
 
+template void transpose_kernel<float>(void *transpose_dst, void *dst, const int &batch_size, const int &seq_len,
+                                      const int &head_num, const int &size_per_head, const cudaStream_t stream);
+template void transpose_kernel<half>(void *transpose_dst, void *dst, const int &batch_size, const int &seq_len,
+                                     const int &head_num, const int &size_per_head, const cudaStream_t stream);
+template void transpose_kernel<nv_bfloat16>(void *transpose_dst, void *dst, const int &batch_size, const int &seq_len,
+                                            const int &head_num, const int &size_per_head, const cudaStream_t stream);
 
-template void transpose_kernel<float>(void* transpose_dst, void* dst, const int& batch_size, const int& seq_len,
-                                      const int& head_num, const int& size_per_head, const cudaStream_t stream);
-template void transpose_kernel<half>(void* transpose_dst, void* dst, const int& batch_size, const int& seq_len,
-                                      const int& head_num, const int& size_per_head, const cudaStream_t stream);
+template void copyKV_transpose_kernel<float>(void *d_K_buf, void *d_V_buf, void *K_buf, void *V_buf, const int &batch_size, const int &seq_len,
+                                             const int &head_num, const int &size_per_head);
+template void copyKV_transpose_kernel<half>(void *d_K_buf, void *d_V_buf, void *K_buf, void *V_buf, const int &batch_size, const int &seq_len,
+                                            const int &head_num, const int &size_per_head);
+template void copyKV_transpose_kernel<nv_bfloat16>(void *d_K_buf, void *d_V_buf, void *K_buf, void *V_buf, const int &batch_size, const int &seq_len,
+                                                   const int &head_num, const int &size_per_head);
 
-template void copyKV_transpose_kernel<float>(void* d_K_buf, void* d_V_buf,void* K_buf, void* V_buf,const int& batch_size, const int& seq_len,
-                                      const int& head_num, const int& size_per_head);
-template void copyKV_transpose_kernel<half>(void* d_K_buf, void* d_V_buf,void* K_buf, void* V_buf,const int& batch_size, const int& seq_len,
-                                      const int& head_num, const int& size_per_head);
-
-template void copyKV_transpose_cross_kernel<float>(void* d_K_buf, void* d_V_buf,void* K_buf, void* V_buf,const int& batch_size, const int& seq_len,
-                                      const int& head_num, const int& size_per_head);
-template void copyKV_transpose_cross_kernel<half>(void* d_K_buf, void* d_V_buf,void* K_buf, void* V_buf,const int& batch_size, const int& seq_len,
-                                      const int& head_num, const int& size_per_head);
+template void copyKV_transpose_cross_kernel<float>(void *d_K_buf, void *d_V_buf, void *K_buf, void *V_buf, const int &batch_size, const int &seq_len,
+                                                   const int &head_num, const int &size_per_head);
+template void copyKV_transpose_cross_kernel<half>(void *d_K_buf, void *d_V_buf, void *K_buf, void *V_buf, const int &batch_size, const int &seq_len,
+                                                  const int &head_num, const int &size_per_head);
+template void copyKV_transpose_cross_kernel<nv_bfloat16>(void *d_K_buf, void *d_V_buf, void *K_buf, void *V_buf, const int &batch_size, const int &seq_len,
+                                                         const int &head_num, const int &size_per_head);

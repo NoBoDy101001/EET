@@ -61,9 +61,9 @@ namespace eet
             switch (desc_.dtype_)
             {
             case torch::kFloat32:
-                fc1_algo_ = CUBLAS_GEMM_DEFAULT_TENSOR_OP;
-                fc2_algo_ = CUBLAS_GEMM_DEFAULT_TENSOR_OP;
-                fc3_algo_ = CUBLAS_GEMM_DEFAULT_TENSOR_OP;
+                fc1_algo_ = CUBLAS_GEMM_DEFAULT;
+                fc2_algo_ = CUBLAS_GEMM_DEFAULT;
+                fc3_algo_ = CUBLAS_GEMM_DEFAULT;
                 alpha_ = new float();
                 beta_ = new float();
                 *((float *)alpha_) = 1.0f;
@@ -77,6 +77,15 @@ namespace eet
                 beta_ = new half();
                 *((half *)alpha_) = (half)1.0f;
                 *((half *)beta_) = (half)0.0f;
+                break;
+            case torch::kBFloat16:
+                fc1_algo_ = CUBLAS_GEMM_DEFAULT;
+                fc2_algo_ = CUBLAS_GEMM_DEFAULT;
+                fc3_algo_ = CUBLAS_GEMM_DEFAULT;
+                alpha_ = new float();
+                beta_ = new float();
+                *((float *)alpha_) = 1.0f;
+                *((float *)beta_) = 0.0f;
                 break;
             //TODO
             case torch::kInt8:
@@ -149,10 +158,10 @@ namespace eet
                                 CUBLAS_OP_N, CUBLAS_OP_N,
                                 n, m, k,
                                 alpha_,
-                                intermediate_0_weights_, desc_.computeType_, n,
-                                input, desc_.computeType_, k,
+                                intermediate_0_weights_, desc_.dataType_, n,
+                                input, desc_.dataType_, k,
                                 beta_,
-                                ffn_inner.data_ptr(), desc_.computeType_, n,
+                                ffn_inner.data_ptr(), desc_.dataType_, n,
                                 desc_.computeType_,
                                 fc1_algo_));
 
@@ -198,10 +207,10 @@ namespace eet
                                 CUBLAS_OP_N, CUBLAS_OP_N,
                                 n, m, k,
                                 alpha_,
-                                intermediate_1_weights_, desc_.computeType_, n,
-                                input, desc_.computeType_, k,
+                                intermediate_1_weights_, desc_.dataType_, n,
+                                input, desc_.dataType_, k,
                                 beta_,
-                                ffn_inner.data_ptr(), desc_.computeType_, n,
+                                ffn_inner.data_ptr(), desc_.dataType_, n,
                                 desc_.computeType_,
                                 fc2_algo_));
 
@@ -221,10 +230,10 @@ namespace eet
                                           CUBLAS_OP_N, CUBLAS_OP_N,
                                           n, m, k,
                                           alpha_,
-                                          output_weights_, desc_.computeType_, n,
-                                          ffn_inner.data_ptr(), desc_.computeType_, k,
+                                          output_weights_, desc_.dataType_, n,
+                                          ffn_inner.data_ptr(), desc_.dataType_, k,
                                           beta_,
-                                          output.data_ptr(), desc_.computeType_, n,
+                                          output.data_ptr(), desc_.dataType_, n,
                                           desc_.computeType_,
                                           fc3_algo_));
             
