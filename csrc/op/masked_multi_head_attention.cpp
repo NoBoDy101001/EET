@@ -39,14 +39,10 @@ namespace eet{
             }
 
             with_bias_ = q_bias_ != nullptr ? true : false;
-            k_cache_ = torch::zeros({desc_.batch_size_, desc_.max_seq_len_, inner_dim_}, desc_.options_);
+            k_cache_ = torch::zeros({desc_.batch_size_, desc_.max_full_seq_len_, inner_dim_}, desc_.options_);          // each layer has kv cache
             v_cache_ = torch::zeros_like(k_cache_);
-            check_cuda_error(cudaMalloc(&fused_qkv_ptr_,sizeof(void**) * FUSED_QKV_PTR_SIZE));
-            // Buffer& attn_out = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache");
+            MManager::get_instance().get_cache(desc_.batch_size_ * 1 * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache");
 
-            qkv_kernel_ = (void**)fused_qkv_ptr_;
-            qkv_input_  = qkv_kernel_ + QKV_PTR_SIZE;
-            qkv_buf_   = qkv_input_  + QKV_PTR_SIZE;
             switch (desc_.dtype_)
             {
             case torch::kFloat32:
@@ -65,9 +61,9 @@ namespace eet{
                 }                
                 break;
             case torch::kFloat16:
-                qkv_weights_algo_ = CUBLAS_GEMM_DEFAULT_TENSOR_OP;
-                q_k_algo_ = CUBLAS_GEMM_DEFAULT_TENSOR_OP;
-                attn_v_algo_ = CUBLAS_GEMM_DEFAULT_TENSOR_OP;
+                qkv_weights_algo_ = CUBLAS_GEMM_DEFAULT;
+                q_k_algo_ = CUBLAS_GEMM_DEFAULT;
+                attn_v_algo_ = CUBLAS_GEMM_DEFAULT;
                 alpha_ = new half();
                 beta_ = new half();
                 atten_scaler_ = new half();
@@ -132,14 +128,14 @@ namespace eet{
             assert((cur_seq_len_ <= desc_.max_full_seq_len_)&& "cur_seq_len must be less than or equal to max_full_seq_len_");
             assert((cur_batch_size_ <= desc_.batch_size_)&& "cur_batch_size_ must be less than or equal to max_batch_size_");
 
-            Buffer& qkv_buffer = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+            Buffer& qkv_buffer = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_ * 3, desc_.dtype_, desc_.options_, "qkv_buffer_full");
             if(pre_layernorm)
             {
                 // pre_layerNorm
-                Buffer& layernormed_query = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                Buffer& layernormed_query = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                         desc_.hidden_units_, desc_.dtype_, desc_.options_, "layernorm_query_full");
-                layer_norm(input,layernormed_query);
+                layer_norm(input, layernormed_query);
 
                 // qkv * weights
                 qkv_weights_mul(layernormed_query.data_ptr(), qkv_buffer);
@@ -152,11 +148,11 @@ namespace eet{
             }  
 
             // qkv add bias                
-            Buffer& q_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+            Buffer& q_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_, desc_.dtype_, desc_.options_, "q_buf_full");
-            Buffer& k_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+            Buffer& k_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_, desc_.dtype_, desc_.options_, "k_buf_full");
-            Buffer& v_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+            Buffer& v_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_, desc_.dtype_, desc_.options_, "v_buf_full");
             qkv_add_bias(qkv_buffer, q_buf, k_buf, v_buf);
 
@@ -165,7 +161,7 @@ namespace eet{
 
             // q * k
             Buffer& qk_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.head_num_ *
-                                        desc_.max_full_seq_len_ * desc_.max_full_seq_len_, desc_.dtype_, desc_.options_, "qk_buf_full");
+                                        cur_seq_len_ * desc_.max_full_seq_len_, desc_.dtype_, desc_.options_, "qk_buf_full");
             q_k_mul(q_buf, k_buf, qk_buf);
 
             q_buf.free();
@@ -178,31 +174,31 @@ namespace eet{
 
             // softmax
             const int64_t *padding_len = pre_padding_length.data_ptr<int64_t>();
-            qk_softmax(qk_buf,padding_len);
+            qk_softmax(qk_buf, padding_len);
 
             // attn * v
-            Buffer& transpose_dst = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+            Buffer& transpose_dst = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_, desc_.dtype_, desc_.options_, "transpose_dst_full");
 
-            attn_v_mul(qk_buf,v_buf,transpose_dst);
+            attn_v_mul(qk_buf, v_buf, transpose_dst);
 
             qk_buf.free();
 
             // transpose k\v cache
-            kv_transpose(k_cache_,v_cache_,k_buf,v_buf);
+            kv_transpose(k_cache_, v_cache_, k_buf, v_buf);
 
             k_buf.free();
             v_buf.free();
 
             // transpose
-            Buffer& dst = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+            Buffer& dst = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_, desc_.dtype_, desc_.options_, "dst_full");
 
             transpose(transpose_dst, dst);
             transpose_dst.free();
 
             // project
-            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache");
+            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * cur_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache");
 
             project(dst,output,input ,pre_layernorm,add_residual);
 
@@ -227,17 +223,17 @@ namespace eet{
             cur_batch_size_ = input.sizes()[0];
             cur_seq_len_ = input.sizes()[1];
             assert(cur_seq_len_ == 1);
-            Buffer& qkv_buffer = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+            Buffer& qkv_buffer = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_ * 3, desc_.dtype_, desc_.options_, "qkv_buffer_inc");
             if(pre_layernorm)
             {
                 // pre_layerNorm
-                Buffer& layernormed_query = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                Buffer& layernormed_query = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                         desc_.hidden_units_, desc_.dtype_, desc_.options_, "layernorm_query_inc");
-                layer_norm(input,layernormed_query);
+                layer_norm(input, layernormed_query);
 
                 // qkv * weights
-                qkv_weights_mul(layernormed_query.data_ptr(),qkv_buffer);
+                qkv_weights_mul(layernormed_query.data_ptr(), qkv_buffer);
                 layernormed_query.free();
             }
             else{
@@ -245,7 +241,7 @@ namespace eet{
                 qkv_weights_mul(input.data_ptr(),qkv_buffer);
             }
 
-            Buffer& context_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+            Buffer& context_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_, desc_.dtype_, desc_.options_, "context_inc");
 
 
@@ -254,10 +250,10 @@ namespace eet{
             const int64_t *reorder_index = reorder_state.data_ptr<int64_t>();
             void* relative_attention_bias_ = relative_attention_bias.data_ptr();
 
-            masked_attention(qkv_buffer,context_buf,padding_len,reorder_index, relative_attention_bias_);
-            qkv_buffer.free();		
+            masked_attention(qkv_buffer, context_buf, padding_len, reorder_index, relative_attention_bias_);
+            qkv_buffer.free();
             
-            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_full_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_,"attn_cache");
+            Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * cur_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, "attn_cache");
             project(context_buf, output, input,pre_layernorm,add_residual);
             context_buf.free();
             auto res = torch::from_blob(output.data_ptr(), input.sizes(), input.strides(), desc_.options_);
