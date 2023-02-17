@@ -31,18 +31,11 @@ namespace eet{
         }
 
         //now we ignore the compare for dtype
-        bool is_ok(const int &size, const c10::ScalarType &dtype) const
+        bool check_size(const int &size, bool strict) const
         {
-            if (!is_idle_)
-            {
-                return false;
-            }
-            if (size == size_)
-            {
+            if (strict && size == size_ || !strict && size <= size_) {
                 return true;
-            }
-            else
-            {
+            } else {
                 return false;
             }
         }
@@ -148,34 +141,37 @@ namespace eet{
         //        false --> size smaller, then reuse
         Buffer& get_buffer(const size_t& size, const c10::ScalarType& dtype,
                            const torch::TensorOptions& options,
-                           const std::string& name = "no_name",
-                           bool strict = true){
-            int itemsize = 0;
-            switch (dtype)
-            {
-            case torch::kFloat32:
-                itemsize = 4;
-                break;
-            case torch::kFloat16:
-                itemsize = 2;
-                break;
-            case torch::kBFloat16:
-                itemsize = 2;
-                break;
-                // TODO
-            case torch::kInt8:
-                itemsize = 1;
-                break;
-            }
+                           bool strict = true,
+                           const std::string& name = "no_name") {
+            // int itemsize = 0;
+            // switch (dtype)
+            // {
+            // case torch::kFloat32:
+            //     itemsize = 4;
+            //     break;
+            // case torch::kFloat16:
+            //     itemsize = 2;
+            //     break;
+            // case torch::kBFloat16:
+            //     itemsize = 2;
+            //     break;
+            //     // TODO
+            // case torch::kInt8:
+            //     itemsize = 1;
+            //     break;
+            // }
             for (auto &buffer : buffers_) {
-                if ((buffer.is_ok(size, dtype) && strict) || (buffer.get_tensor().nbytes() >= size * itemsize && !strict)) 
+                if (buffer.is_idle() && buffer.check_size(size, strict))
                 {
+#ifdef _DEBUG_MODE_
+                    std::cout << "There are " << buffers_.size() << " buffer in vector" << "    Get a buffer of size : " << size << " buffer name: " << buffer.get_str() << std::endl;
+#endif
                     buffer.set_busy();
                     return buffer;
                 }
             }
             std::cout << "There are " << buffers_.size() << " buffer in vector"
-                      << "    Request a buffer of size : " << size << std::endl;
+                      << "    Request a buffer of size : " << size << " buffer name: " << name << std::endl;
 
             buffers_.emplace_back(size, dtype, options, name);
             return buffers_.back();
@@ -183,15 +179,14 @@ namespace eet{
 
         void allocate_buffer(const size_t &size, const c10::ScalarType &dtype,
                              const torch::TensorOptions &options,
-                             const std::string &name = "no_name",
-                             bool strict = true) {
+                             const std::string &name = "no_name") {
             for (auto &buffer : buffers_) {
                 if (buffer.check_str(name)) {
                     return;
                 }
             }
             std::cout << "There are " << buffers_.size() << " buffer in vector"
-                      << "    Request a buffer of size : " << size << std::endl;
+                      << "    Request a buffer of size : " << size << " buffer name: " << name << std::endl;
 
             buffers_.emplace_back(size, dtype, options, name);
             buffers_.back().free();

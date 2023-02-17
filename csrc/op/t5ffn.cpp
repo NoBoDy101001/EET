@@ -56,8 +56,8 @@ namespace eet
                 d_ff_ = desc_.d_ff_;
             }
             MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, ffn_cache_name_);
-            MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * d_ff_, desc_.dtype_, desc_.options_, "ffn_buffer1");
-            MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * d_ff_, desc_.dtype_, desc_.options_, "ffn_buffer2");
+            MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * d_ff_, desc_.dtype_, desc_.options_, "t5ffn_buffer1");
+            MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * d_ff_, desc_.dtype_, desc_.options_, "t5ffn_buffer2");
             switch (desc_.dtype_)
             {
             case torch::kFloat32:
@@ -91,7 +91,6 @@ namespace eet
             case torch::kInt8:
                 break;
             }
-            std::cout << "eet ffn init compelete!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
         }
 
         torch::Tensor T5FeedForwardNetwork::forward(torch::Tensor &input,
@@ -107,7 +106,7 @@ namespace eet
             Buffer &ffn_inner_linear = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_seq_len_ * d_ff_, desc_.dtype_, desc_.options_);
 
             // pre_layerNorm
-            Buffer& layernorm_tensor = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, "ffn_layernorm");
+            Buffer& layernorm_tensor = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_);
             layer_norm(input, layernorm_tensor);
 
             fc1_mul(layernorm_tensor.data_ptr(), ffn_inner_gelu);
