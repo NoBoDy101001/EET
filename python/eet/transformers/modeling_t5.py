@@ -695,10 +695,7 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
         model_dict = {}
         embedding_dict = {}
         torch_model = T5ForConditionalGeneration.from_pretrained(model_id_or_path)
-        if data_type == torch.float32:
-            torch_model = torch_model.float()
-        else:
-            torch_model = torch_model.half()
+        torch_model = torch_model.to(data_type)
 
         t5 = EETT5Model.from_torch(torch_model, max_batch, max_prompt_seq_len, max_full_seq_len, data_type)
 

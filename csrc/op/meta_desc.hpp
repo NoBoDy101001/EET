@@ -34,15 +34,15 @@ class MetaDesc{
         switch(dtype_){
             case torch::kFloat32:
                 dataType_ = CUDA_R_32F;
-                computeType_ = CUDA_R_32F;
+                computeType_ = CUBLAS_COMPUTE_32F_FAST_16F; // CUBLAS_COMPUTE_32F_FAST_TF32
                 break;
             case torch::kFloat16:
                 dataType_ = CUDA_R_16F;
-                computeType_ = CUDA_R_16F; 
+                computeType_ = CUBLAS_COMPUTE_16F;
                 break;
             case torch::kBFloat16:
                 dataType_ = CUDA_R_16BF;
-                computeType_ = CUDA_R_32F;
+                computeType_ = CUBLAS_COMPUTE_32F_FAST_16F; // CUBLAS_COMPUTE_32F_FAST_TF32
                 break;
             case torch::kInt8:
                 break;
@@ -79,15 +79,15 @@ class MetaDesc{
         switch(dtype_){
             case torch::kFloat32:
                 dataType_ = CUDA_R_32F;
-                computeType_ = CUDA_R_32F;
+                computeType_ = CUBLAS_COMPUTE_32F_FAST_16F; // CUBLAS_COMPUTE_32F_FAST_TF32
                 break;
             case torch::kFloat16:
                 dataType_ = CUDA_R_16F;
-                computeType_ = CUDA_R_16F; 
+                computeType_ = CUBLAS_COMPUTE_16F;
                 break;
             case torch::kBFloat16:
                 dataType_ = CUDA_R_16BF;
-                computeType_ = CUDA_R_32F;
+                computeType_ = CUBLAS_COMPUTE_32F_FAST_16F; // CUBLAS_COMPUTE_32F_FAST_TF32
                 break;
                 //TODO
             case torch::kInt8:
@@ -118,9 +118,10 @@ class MetaDesc{
     int layer_num_;
     std::string activation_fn_;
     torch::TensorOptions options_;
-    cudaDataType_t dataType_;       // cuda dtype
-    cudaDataType_t computeType_;    // cuda dtype
-    c10::ScalarType dtype_;         // torch dtype
+    cudaDataType_t dataType_;           // cuda dtype
+    // cudaDataType_t computeType_;     // cuda dtype
+    cublasComputeType_t computeType_;   // cublas type
+    c10::ScalarType dtype_;             // torch dtype
 
     static cublasHandle_t cublasHandle;
     static cudaStream_t stream;
