@@ -30,6 +30,10 @@ namespace eet{
             return tensor_;
         }
 
+        void copy(torch::Tensor& tensor) {
+            tensor_.copy_(tensor);
+        }
+
         //now we ignore the compare for dtype
         bool check_size(const int &size, bool strict) const
         {

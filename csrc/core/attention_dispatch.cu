@@ -1369,7 +1369,7 @@ void t5_masked_attention_kernel(
     if(ite < padding_len)
         continue;
     value_val_r.v = *((float_n_t *)&value_cache[ite * offset] + lane_id);
-    //for the last step, we should update K + bias_K to the cache
+    //for the last step, we should update V + bias_V to the cache
     if(ite == step - 1)
     {
       for (int i = 0; i < elems_per_thread; i++)

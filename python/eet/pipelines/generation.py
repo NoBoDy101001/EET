@@ -983,15 +983,17 @@ class GenerationMixin_EET(GenerationMixin):
         this_peer_finished = False  # used by synced_gpus only
         first_pass = True
         self_past_key_values_length = 0
+        standard_idx = torch.tensor([i for i in range(batch_size)], device=input_ids.device)
+        beam_idx = standard_idx
         while True:
-            model_inputs = self.prepare_inputs_for_generation(input_ids, first_pass = first_pass, **model_kwargs)
-
+            model_inputs = self.prepare_inputs_for_generation(input_ids, first_pass=first_pass, **model_kwargs)
             outputs = self(
                 **model_inputs,
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 first_pass=first_pass,
                 self_past_key_values_length=self_past_key_values_length,
+                reorder_state=None if beam_idx.equal(standard_idx) else beam_idx,
             )
 
             first_pass = False
@@ -1047,6 +1049,7 @@ class GenerationMixin_EET(GenerationMixin):
                 next_indices,
                 pad_token_id=pad_token_id,
                 eos_token_id=eos_token_id,
+                beam_indices=beam_indices,
             )
 
             beam_scores = beam_outputs["next_beam_scores"]
@@ -1082,25 +1085,19 @@ class GenerationMixin_EET(GenerationMixin):
             pad_token_id=pad_token_id,
             eos_token_id=eos_token_id,
             max_length=stopping_criteria.max_length,
+            beam_indices=beam_indices,
         )
 
         if return_dict_in_generate:
             if not output_scores:
                 sequence_outputs["sequence_scores"] = None
-            else:
-                num_return_sequences = beam_scorer.num_beam_hyps_to_keep
-                # return only as many indices as sequences
-                beam_indices = tuple(
-                    (beam_indices[i * num_beams : i * num_beams + num_return_sequences] for i in range(batch_size))
-                )
-                beam_indices = sum(beam_indices, ())
 
             if self.config.is_encoder_decoder:
                 return BeamSearchEncoderDecoderOutput(
                     sequences=sequence_outputs["sequences"],
                     sequences_scores=sequence_outputs["sequence_scores"],
                     scores=scores,
-                    beam_indices=beam_indices,
+                    beam_indices=sequence_outputs["beam_indices"],
                     encoder_attentions=encoder_attentions,
                     encoder_hidden_states=encoder_hidden_states,
                     decoder_attentions=decoder_attentions,
@@ -1112,7 +1109,7 @@ class GenerationMixin_EET(GenerationMixin):
                     sequences=sequence_outputs["sequences"],
                     sequences_scores=sequence_outputs["sequence_scores"],
                     scores=scores,
-                    beam_indices=beam_indices,
+                    beam_indices=sequence_outputs["beam_indices"],
                     attentions=decoder_attentions,
                     hidden_states=decoder_hidden_states,
                 )
@@ -1294,8 +1291,10 @@ class GenerationMixin_EET(GenerationMixin):
         this_peer_finished = False  # used by synced_gpus only
         first_pass = True
         self_past_key_values_length = 0
+        standard_idx = torch.tensor([i for i in range(batch_size)], device=input_ids.device)
+        beam_idx = standard_idx
         while True:
-            model_inputs = self.prepare_inputs_for_generation(input_ids, first_pass = first_pass, **model_kwargs)
+            model_inputs = self.prepare_inputs_for_generation(input_ids, first_pass=first_pass, **model_kwargs)
 
             outputs = self(
                 **model_inputs,
@@ -1303,6 +1302,7 @@ class GenerationMixin_EET(GenerationMixin):
                 output_hidden_states=output_hidden_states,
                 first_pass=first_pass,
                 self_past_key_values_length=self_past_key_values_length,
+                reorder_state=None if beam_idx.equal(standard_idx) else beam_idx,
             )
 
             first_pass = False
@@ -1365,11 +1365,13 @@ class GenerationMixin_EET(GenerationMixin):
                 next_indices,
                 pad_token_id=pad_token_id,
                 eos_token_id=eos_token_id,
+                beam_indices=beam_indices,
             )
             beam_scores = beam_outputs["next_beam_scores"]
             beam_next_tokens = beam_outputs["next_beam_tokens"]
             beam_idx = beam_outputs["next_beam_indices"]
 
+            self_past_key_values_length += 1
             input_ids = torch.cat([input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1)
 
             model_kwargs = self._update_model_kwargs_for_generation(
@@ -1398,6 +1400,7 @@ class GenerationMixin_EET(GenerationMixin):
             pad_token_id=pad_token_id,
             eos_token_id=eos_token_id,
             max_length=stopping_criteria.max_length,
+            beam_indices=beam_indices,
         )
 
         if return_dict_in_generate:
@@ -1416,7 +1419,7 @@ class GenerationMixin_EET(GenerationMixin):
                     sequences=sequence_outputs["sequences"],
                     sequences_scores=sequence_outputs["sequence_scores"],
                     scores=scores,
-                    beam_indices=beam_indices,
+                    beam_indices=sequence_outputs["beam_indices"],
                     encoder_attentions=encoder_attentions,
                     encoder_hidden_states=encoder_hidden_states,
                     decoder_attentions=decoder_attentions,
@@ -1428,7 +1431,7 @@ class GenerationMixin_EET(GenerationMixin):
                     sequences=sequence_outputs["sequences"],
                     sequences_scores=sequence_outputs["sequence_scores"],
                     scores=scores,
-                    beam_indices=beam_indices,
+                    beam_indices=sequence_outputs["beam_indices"],
                     attentions=decoder_attentions,
                     hidden_states=decoder_hidden_states,
                 )

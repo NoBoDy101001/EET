@@ -674,6 +674,7 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
         encoder_seq_length=torch.empty(0),
         self_past_key_values_length=0,
         attention_reweight=None,
+        reorder_state=None,
         **kwargs,
     ):
 
@@ -688,6 +689,7 @@ class EETT5ForConditionalGeneration(GenerationMixin_EET):
             encoder_seq_length=encoder_seq_length,
             self_past_key_values_length=self_past_key_values_length,
             attention_reweight=attention_reweight,
+            reorder_state=reorder_state,
             )
 
     def from_pretrained(model_id_or_path: str, max_batch, max_prompt_seq_len=200, max_full_seq_len=512, data_type=torch.float32):
