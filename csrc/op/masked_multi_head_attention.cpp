@@ -39,7 +39,7 @@ namespace eet{
             }
 
             with_bias_ = q_bias_ != nullptr ? true : false;
-            k_cache_ = torch::zeros({desc_.batch_size_, desc_.max_full_seq_len_, inner_dim_}, desc_.options_);          // each layer has kv cache
+            k_cache_ = torch::zeros({desc_.batch_size_ * desc_.max_full_seq_len_ * inner_dim_}, desc_.options_);          // each layer has kv cache
             v_cache_ = torch::zeros_like(k_cache_);
             MManager::get_instance().get_cache(desc_.batch_size_ * 1 * desc_.hidden_units_, desc_.dtype_, desc_.options_, "self_mask_attn_cache");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * inner_dim_ * 3, desc_.dtype_, desc_.options_, "qkv_full");
@@ -48,6 +48,8 @@ namespace eet{
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "k_buf");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "v_buf");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.head_num_ * desc_.max_seq_len_ * desc_.max_seq_len_, desc_.dtype_, desc_.options_, "qk_buf");
+            MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "reorder_k_buf");
+            MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "reorder_v_buf");
             switch (desc_.dtype_)
             {
             case torch::kFloat32:
@@ -252,7 +254,20 @@ namespace eet{
             const int64_t *reorder_index = reorder_state.data_ptr<int64_t>();
             void* relative_attention_bias_ = relative_attention_bias.data_ptr();
 
-            masked_attention(qkv_buffer, context_buf, padding_len, reorder_index, relative_attention_bias_);
+            if (reorder_index != nullptr) {
+                Buffer& k_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                                        inner_dim_, desc_.dtype_, desc_.options_, true);
+                Buffer& v_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                                        inner_dim_, desc_.dtype_, desc_.options_, true);
+
+                k_buf.copy(k_cache_);
+                v_buf.copy(v_cache_);
+                reorder_cache(k_cache_, v_cache_, k_buf, v_buf, reorder_index);     //TODO 需要申请buffer缓存中间结果
+                k_buf.free();
+                v_buf.free();
+            }
+
+            masked_attention(qkv_buffer, context_buf, padding_len, nullptr, relative_attention_bias_);
             qkv_buffer.free();
             
             Buffer& output = MManager::get_instance().get_cache(desc_.batch_size_ * cur_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, "self_mask_attn_cache");
@@ -439,6 +454,24 @@ namespace eet{
          {
             RUN_KERNEL(copyKV_transpose_kernel,desc_.dtype_,d_K_buf.data_ptr(), d_V_buf.data_ptr(),K_buf.data_ptr(), V_buf.data_ptr(),cur_batch_size_, cur_seq_len_,
                    desc_.head_num_, size_per_head_);
+            #ifdef _DEBUG_MODE_
+            cudaDeviceSynchronize();
+            check_cuda_error(cudaGetLastError());
+            #endif
+         }
+
+        void MaskedMultiHeadAttention::reorder_cache(torch::Tensor &K_cache, torch::Tensor &V_cache, Buffer &K_buf, Buffer &V_buf, const int64_t *reorder_index)
+         {
+            RUN_KERNEL(reorderKV_kernel, desc_.dtype_, K_cache.data_ptr(), V_cache.data_ptr(), K_buf.data_ptr(), V_buf.data_ptr(), reorder_index, first_batch_size_, step_, desc_.head_num_, size_per_head_);
+            #ifdef _DEBUG_MODE_
+            cudaDeviceSynchronize();
+            check_cuda_error(cudaGetLastError());
+            #endif
+         }
+
+        void MaskedMultiHeadAttention::reorder_cache(torch::Tensor &K_cache, torch::Tensor &V_cache, torch::Tensor &K_buf, torch::Tensor &V_buf, const int64_t *reorder_index)
+         {
+            RUN_KERNEL(reorderKV_kernel, desc_.dtype_, K_cache.data_ptr(), V_cache.data_ptr(), K_buf.data_ptr(), V_buf.data_ptr(), reorder_index, first_batch_size_, step_, desc_.head_num_, size_per_head_);
             #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
             check_cuda_error(cudaGetLastError());

@@ -86,6 +86,8 @@ namespace eet{
                                 const void *relative_attention_bias_);
 
             void kv_transpose(torch::Tensor& d_K_buf, torch::Tensor& d_V_buf,Buffer& K_buf,Buffer& V_buf);
+            void reorder_cache(torch::Tensor &K_cache, torch::Tensor &V_cache, Buffer &K_buf, Buffer &V_buf, const int64_t *reorder_index);
+            void reorder_cache(torch::Tensor &K_cache, torch::Tensor &V_cache, torch::Tensor &K_buf, torch::Tensor &V_buf, const int64_t *reorder_index);
             
             MetaDesc desc_;
             // torch::Tensor output_;

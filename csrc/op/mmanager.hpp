@@ -30,6 +30,10 @@ namespace eet{
             return tensor_;
         }
 
+        void copy(torch::Tensor& tensor) {
+            tensor_.copy_(tensor);
+        }
+
         //now we ignore the compare for dtype
         bool check_size(const int &size, bool strict) const
         {
@@ -163,9 +167,9 @@ namespace eet{
             for (auto &buffer : buffers_) {
                 if (buffer.is_idle() && buffer.check_size(size, strict))
                 {
-#ifdef _DEBUG_MODE_
-                    std::cout << "There are " << buffers_.size() << " buffer in vector" << "    Get a buffer of size : " << size << " buffer name: " << buffer.get_str() << std::endl;
-#endif
+// #ifdef _DEBUG_MODE_
+//                     std::cout << "There are " << buffers_.size() << " buffer in vector" << "    Get a buffer of size : " << size << " buffer name: " << buffer.get_str() << std::endl;
+// #endif
                     buffer.set_busy();
                     return buffer;
                 }
