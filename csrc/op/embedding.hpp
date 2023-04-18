@@ -12,7 +12,7 @@ namespace eet
         class Embedding : public OpBase
         {
         public:
-            Embedding(MetaDesc desc,
+            Embedding(MetaDesc& desc,
                       const torch::Tensor &embedding_weights,
                       const torch::Tensor &position_weights,
                       const torch::Tensor &token_type_weights,
@@ -29,7 +29,7 @@ namespace eet
             void layer_norm(Buffer& input,Buffer& out); 
 
             int step_;
-            MetaDesc desc_;
+            MetaDesc& desc_;
             // torch::Tensor output_;
             void *embedding_weights_;
             void *position_weights_;

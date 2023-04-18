@@ -11,7 +11,7 @@ namespace eet{
 
         class CrossMultiHeadAttention : public OpBase{
         public:
-            CrossMultiHeadAttention(MetaDesc desc,
+            CrossMultiHeadAttention(MetaDesc& desc,
                                     const torch::Tensor& Q_weights,
                                     const torch::Tensor& Q_bias,
                                     const torch::Tensor& K_weights,
@@ -95,11 +95,12 @@ namespace eet{
                                     const float *attention_reweight);
 
             void kv_transpose(torch::Tensor &d_K_buf, torch::Tensor &d_V_buf, Buffer &K_buf, Buffer &V_buf);
-            MetaDesc desc_;
+            MetaDesc& desc_;
             // torch::Tensor output_;
             torch::Tensor key_mem_cache_, value_mem_cache_, attn_out_cache_;
 
-            cublasGemmAlgo_t qkv_weights_algo_, q_k_algo_, attn_v_algo_;
+            std::vector<int> q_mnk_ = {0, 0, 0}, kv_mnk_ = {0, 0, 0}, o_mnk_ = {0, 0, 0};
+            std::pair<bool, cublasLtMatmulAlgo_t> q_algo_, kv_algo_, o_algo_;
 
             bool with_bias_;
             int cur_batch_size_;
@@ -110,6 +111,8 @@ namespace eet{
             int step_;
             void* alpha_;
             void* beta_;
+            void* o_beta_;
+            int workspace_size_ = 0;
 
         private:
             void* q_weights_;
@@ -122,6 +125,7 @@ namespace eet{
             void* output_bias_;
             void* layernorm_weights_;
             void* layernorm_bias_;
+            void* workspace_ = nullptr;
         };
     }
 }

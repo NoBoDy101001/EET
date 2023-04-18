@@ -21,7 +21,7 @@ namespace eet{
 
         void* data_ptr() const{
             if (tensor_.data_ptr() == nullptr){
-                printf("Error : try to use a empty Buffer \n");
+                printf("[EET][ERROR] Try to use a empty Buffer \n");
             }
             return this->tensor_.data_ptr();
         }
@@ -143,29 +143,13 @@ namespace eet{
                            const torch::TensorOptions& options,
                            bool strict = true,
                            const std::string& name = "no_name") {
-            // int itemsize = 0;
-            // switch (dtype)
-            // {
-            // case torch::kFloat32:
-            //     itemsize = 4;
-            //     break;
-            // case torch::kFloat16:
-            //     itemsize = 2;
-            //     break;
-            // case torch::kBFloat16:
-            //     itemsize = 2;
-            //     break;
-            //     // TODO
-            // case torch::kInt8:
-            //     itemsize = 1;
-            //     break;
-            // }
+
             for (auto &buffer : buffers_) {
                 if (buffer.is_idle() && buffer.check_size(size, strict))
                 {
-#ifdef _DEBUG_MODE_
-                    std::cout << "There are " << buffers_.size() << " buffer in vector" << "    Get a buffer of size : " << size << " buffer name: " << buffer.get_str() << std::endl;
-#endif
+// #ifdef _DEBUG_MODE_
+//                     std::cout << "There are " << buffers_.size() << " buffer in vector" << "    Get a buffer of size : " << size << " buffer name: " << buffer.get_str() << std::endl;
+// #endif
                     buffer.set_busy();
                     return buffer;
                 }

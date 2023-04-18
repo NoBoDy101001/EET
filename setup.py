@@ -23,32 +23,37 @@ def get_cuda_bare_metal_version(cuda_dir):
     release = output[release_idx].split(".")
     bare_metal_major = release[0]
     bare_metal_minor = release[1][0]
+    cuda_version = bare_metal_major + bare_metal_minor
+    return cuda_version
 
-    return raw_output, bare_metal_major, bare_metal_minor
+cuda_version = get_cuda_bare_metal_version(cpp_extension.CUDA_HOME)
 
-_, bare_metal_major, _ = get_cuda_bare_metal_version(cpp_extension.CUDA_HOME)
-if int(bare_metal_major) == 11:
-    os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
+if int(cuda_version) >= 110:
+    os.environ["TORCH_CUDA_ARCH_LIST"] = "8.6;8.0"
+    nvcc_args = [
+        '-O3',
+        '--use_fast_math',
+        '-U__CUDA_NO_HALF_OPERATORS__',
+        '-U__CUDA_NO_HALF_CONVERSIONS__',
+        '-U__CUDA_NO_HALF2_OPERATORS__',
+        '-U__CUDA_NO_HALF2_CONVERSIONS__',
+        "-U__CUDA_NO_BFLOAT16_OPERATORS__",
+        "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
+        "-U__CUDA_NO_BFLOAT162_OPERATORS__",
+        "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
+        # '-gencode=arch=compute_86,code=sm_86',
+        # '-gencode=arch=compute_80,code=sm_80',
+    ]
 else:
     os.environ["TORCH_CUDA_ARCH_LIST"] = "6.0;6.1;6.2;7.0;7.5"
-
-nvcc_args = [
-    '-O3',
-    '--use_fast_math',
-    '-U__CUDA_NO_HALF_OPERATORS__', 
-    '-U__CUDA_NO_HALF_CONVERSIONS__',
-    '-U__CUDA_NO_HALF2_OPERATORS__',
-    '-U__CUDA_NO_HALF2_CONVERSIONS__',
-    "-U__CUDA_NO_BFLOAT16_OPERATORS__",
-    "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
-    "-U__CUDA_NO_BFLOAT162_OPERATORS__",
-    "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
-    # '-gencode=arch=compute_86,code=sm_86',
-    # '-gencode=arch=compute_80,code=sm_80',
-    # '-gencode=arch=compute_70,code=sm_70',
-    # '-gencode=arch=compute_61,code=sm_61',
-    # '-gencode=arch=compute_60,code=sm_60',
-]
+    nvcc_args = [
+        '-O3',
+        '--use_fast_math',
+        '-U__CUDA_NO_HALF_OPERATORS__',
+        '-U__CUDA_NO_HALF_CONVERSIONS__',
+        '-U__CUDA_NO_HALF2_OPERATORS__',
+        '-U__CUDA_NO_HALF2_CONVERSIONS__',
+    ]
 
 setup(
     name='EET',
@@ -62,9 +67,15 @@ setup(
             name='EET',
             sources=sources,
             include_dirs=include_paths,
-            extra_compile_args={'cxx': ['-g'],
+            extra_compile_args={'cxx': ['-g',
+                                        # "-U NDEBUG",
+                                        ],
                                 'nvcc': nvcc_args},
-            define_macros=[('VERSION_INFO', __version__)]
+            define_macros=[('VERSION_INFO', __version__),
+                           ('CUDA_VERSION', int(cuda_version)),
+                        #    ('_DEBUG_MODE_', None),
+                        #    ('_AUTOTUNE_', None),
+                           ]
             )
         ],
     cmdclass={

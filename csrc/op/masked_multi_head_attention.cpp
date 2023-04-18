@@ -1,4 +1,5 @@
 #include "op/masked_multi_head_attention.hpp"
+#include "op/cublasLt_wrappers.hpp"
 #include "core/add_bias.cuh"
 #include "core/transpose.cuh"
 #include "core/layer_norm.cuh"
@@ -10,7 +11,7 @@
 // for gpt
 namespace eet{
     namespace op{
-        MaskedMultiHeadAttention::MaskedMultiHeadAttention(MetaDesc desc,
+        MaskedMultiHeadAttention::MaskedMultiHeadAttention(MetaDesc& desc,
                                     const torch::Tensor& QKV_weights,
                                     const torch::Tensor& Q_bias,
                                     const torch::Tensor& K_bias,
@@ -48,47 +49,52 @@ namespace eet{
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "k_buf");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "v_buf");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.head_num_ * desc_.max_seq_len_ * desc_.max_seq_len_, desc_.dtype_, desc_.options_, "qk_buf");
+// #ifdef _AUTOTUNE_
+#ifdef VERSION_INFO
+            torch::TensorOptions tmp = torch::TensorOptions().dtype(torch::kInt8).device("cuda:0").requires_grad(false);
+            Buffer &workspace = MManager::get_instance().get_cache(WORKSPACE_SIZE, torch::kInt8, tmp, "workspace");
+            workspace_ = workspace.data_ptr();
+            workspace_size_ = WORKSPACE_SIZE;
+#endif
+
             switch (desc_.dtype_)
             {
             case torch::kFloat32:
-                qkv_weights_algo_ = CUBLAS_GEMM_DEFAULT;
-                q_k_algo_ = CUBLAS_GEMM_DEFAULT;
-                attn_v_algo_ = CUBLAS_GEMM_DEFAULT;
                 alpha_ = new float();
                 beta_ = new float();
                 atten_scaler_ = new float();
+                o_beta_ = new float();
                 *((float *)alpha_) = 1.0f;
                 *((float *)beta_) = 0.0f;
+                *((float *)o_beta_) = 1.0f;
                 if (with_bias_) {
                     *((float *)atten_scaler_) = sqrt(1.0f / size_per_head_);
                 } else {
                     *((float *)atten_scaler_) = 1.0f;
-                }                
+                }
                 break;
             case torch::kFloat16:
-                qkv_weights_algo_ = CUBLAS_GEMM_DEFAULT;
-                q_k_algo_ = CUBLAS_GEMM_DEFAULT;
-                attn_v_algo_ = CUBLAS_GEMM_DEFAULT;
                 alpha_ = new half();
                 beta_ = new half();
                 atten_scaler_ = new half();
-                *((half *)alpha_) = 1.0f;
-                *((half *)beta_) = 0.0f;
+                o_beta_ = new half();
+                *((half *)alpha_) = (half)1.0f;
+                *((half *)beta_) = (half)0.0f;
+                *((half *)o_beta_) = (half)1.0f;
                 if (with_bias_) {
                     *((half *)atten_scaler_) = sqrt(1.0f / size_per_head_);
                 } else {
                     *((half *)atten_scaler_) = 1.0f;
-                }
+                }    
                 break;
             case torch::kBFloat16:
-                qkv_weights_algo_ = CUBLAS_GEMM_DEFAULT;
-                q_k_algo_ = CUBLAS_GEMM_DEFAULT;
-                attn_v_algo_ = CUBLAS_GEMM_DEFAULT;
                 alpha_ = new float();
                 beta_ = new float();
                 atten_scaler_ = new float();
+                o_beta_ = new float();
                 *((float *)alpha_) = 1.0f;
                 *((float *)beta_) = 0.0f;
+                *((float *)o_beta_) = 1.0f;
                 if (with_bias_) {
                     *((float *)atten_scaler_) = sqrt(1.0f / size_per_head_);
                 } else {
@@ -173,13 +179,13 @@ namespace eet{
 
             // relative attention bias
             void* relative_attention_bias_ = relative_attention_bias.data_ptr();
-            if (relative_attention_bias_ != nullptr) {
-                add_relative_attn_bias(qk_buf, relative_attention_bias_);
-            }
+            // if (relative_attention_bias_ != nullptr) {
+            //     add_relative_attn_bias(qk_buf, relative_attention_bias_);
+            // }
 
             // softmax
             const int64_t *padding_len = pre_padding_length.data_ptr<int64_t>();
-            qk_softmax(qk_buf, padding_len);
+            qk_softmax(qk_buf, relative_attention_bias_, padding_len);
 
             // transpose k\v cache
             kv_transpose(k_cache_, v_cache_, k_buf, v_buf);
@@ -281,10 +287,31 @@ namespace eet{
 
         void MaskedMultiHeadAttention::qkv_weights_mul(void* input, 
                                     Buffer& qkv_buffer){
-                const int m = cur_batch_size_ * cur_seq_len_;
-                const int k = desc_.hidden_units_;
-                const int n = 3 * inner_dim_;
+            const int m = cur_batch_size_ * cur_seq_len_;
+            const int k = desc_.hidden_units_;
+            const int n = 3 * inner_dim_;
 
+            if (qkv_mnk_ != std::vector<int> {n, m, k}) {
+                qkv_algo_ = desc_.getAlgo(n, m, k);
+                qkv_mnk_ = std::vector<int> {n, m, k};
+            }
+#ifdef _AUTOTUNE_
+            qkv_algo_.first = true;
+#endif
+            if (qkv_algo_.first) {
+                cublasLtgemm(desc_.ltHandle,
+                            CUBLAS_OP_N, CUBLAS_OP_N,
+                            n, m, k,
+                            alpha_,
+                            qkv_weights_, n,
+                            input, k,
+                            beta_,
+                            qkv_buffer.data_ptr(), n,
+                            desc_.dataType_,
+                            desc_.scaleType_,
+                            desc_.computeType_, qkv_algo_.second,
+                            workspace_, workspace_size_, desc_.stream);
+            } else {
                 check_cuda_error(cublasGemmEx(desc_.cublasHandle,
                     CUBLAS_OP_N, CUBLAS_OP_N,
                     n, m, k,
@@ -294,8 +321,11 @@ namespace eet{
                     beta_,
                     qkv_buffer.data_ptr(), desc_.dataType_, n,
                     desc_.computeType_,
-                    qkv_weights_algo_));
-
+                    CUBLAS_GEMM_DEFAULT));
+            }
+#ifdef _AUTOTUNE_
+            desc_.saveAlgo(n, m, k, qkv_algo_.second);
+#endif
 
 #ifdef _DEBUG_MODE_
         cudaDeviceSynchronize();
@@ -329,7 +359,7 @@ namespace eet{
                 qk_buf.data_ptr(), desc_.dataType_, cur_seq_len_, cur_seq_len_ * cur_seq_len_,
                 cur_batch_size_ * desc_.head_num_,
                 desc_.computeType_,
-                q_k_algo_));
+                CUBLAS_GEMM_DEFAULT));
 
 #ifdef _DEBUG_MODE_
     cudaDeviceSynchronize();
@@ -348,10 +378,10 @@ namespace eet{
 #endif
         }
 
-        void MaskedMultiHeadAttention::qk_softmax(Buffer& qk_buf,const int64_t *padding_len){
+        void MaskedMultiHeadAttention::qk_softmax(Buffer& qk_buf, void* relative_attention_bias, const int64_t *padding_len){
             // float scalar = 1 / sqrtf(size_per_head_ * 1.0f);
 
-            RUN_KERNEL(softmax_kernel,desc_.dtype_,qk_buf.data_ptr(), padding_len,  cur_batch_size_,
+            RUN_KERNEL(softmax_kernel,desc_.dtype_,qk_buf.data_ptr(), relative_attention_bias, padding_len,  cur_batch_size_,
                     desc_.head_num_,cur_seq_len_, desc_.stream);
 #ifdef _DEBUG_MODE_
     cudaDeviceSynchronize();
@@ -372,7 +402,7 @@ namespace eet{
                     transpose_dst.data_ptr(), desc_.dataType_, size_per_head_, cur_seq_len_ * size_per_head_,
                     cur_batch_size_ * desc_.head_num_,
                     desc_.computeType_,
-                    attn_v_algo_));
+                    CUBLAS_GEMM_DEFAULT));
 
 #ifdef _DEBUG_MODE_
     cudaDeviceSynchronize();
@@ -390,21 +420,50 @@ namespace eet{
             #endif
         }
 
-        void MaskedMultiHeadAttention::project(const Buffer& dst, Buffer& res,torch::Tensor& input, bool pre_layernorm,bool add_residual){
+        void MaskedMultiHeadAttention::project(const Buffer& dst, Buffer& res, torch::Tensor& input, bool pre_layernorm, bool add_residual){
             const int m = cur_batch_size_ * cur_seq_len_;
             int k = inner_dim_;
             int n = desc_.hidden_units_;
-            check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                            CUBLAS_OP_N, CUBLAS_OP_N,
-                                            n, m, k,
-                                            alpha_,
-                                            output_weights_, desc_.dataType_, n,
-                                            dst.data_ptr(), desc_.dataType_, k,
-                                            beta_,
-                                            res.data_ptr(), desc_.dataType_, n,
-                                            desc_.computeType_,
-                                            qkv_weights_algo_));
-            if(add_residual)
+
+            if (o_mnk_ != std::vector<int> {n, m, k}) {
+                o_algo_ = desc_.getAlgo(n, m, k);
+                o_mnk_ = std::vector<int> {n, m, k};
+            }
+#ifdef _AUTOTUNE_
+            o_algo_.first = true;
+#endif
+            if (o_algo_.first) {
+                cublasLtgemm(desc_.ltHandle,
+                            CUBLAS_OP_N, CUBLAS_OP_N,
+                            n, m, k,
+                            alpha_,
+                            output_weights_, n,
+                            dst.data_ptr(), k,
+                            o_beta_,
+                            res.data_ptr(), n,
+                            desc_.dataType_,
+                            desc_.scaleType_,
+                            desc_.computeType_, o_algo_.second,
+                            workspace_, workspace_size_, 
+                            desc_.stream, input.data_ptr());
+            } else {
+                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
+                                                CUBLAS_OP_N, CUBLAS_OP_N,
+                                                n, m, k,
+                                                alpha_,
+                                                output_weights_, desc_.dataType_, n,
+                                                dst.data_ptr(), desc_.dataType_, k,
+                                                beta_,
+                                                res.data_ptr(), desc_.dataType_, n,
+                                                desc_.computeType_,
+                                                CUBLAS_GEMM_DEFAULT));
+            }
+
+#ifdef _AUTOTUNE_
+            desc_.saveAlgo(n, m, k, o_algo_.second);
+#endif
+
+            if(add_residual && !o_algo_.first)
             {   
                 if(!pre_layernorm)
                 {   
@@ -429,10 +488,10 @@ namespace eet{
                                m, n, desc_.stream);
                 }
             }
-            #ifdef _DEBUG_MODE_
+#ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
             check_cuda_error(cudaGetLastError());
-            #endif
+#endif
          }
 
         void MaskedMultiHeadAttention::kv_transpose(torch::Tensor& d_K_buf, torch::Tensor& d_V_buf,Buffer& K_buf,Buffer& V_buf)

@@ -5,7 +5,7 @@ namespace eet
 {
     namespace op
     {
-        LayerNorm::LayerNorm(MetaDesc desc, const torch::Tensor& gamma, const torch::Tensor& beta):
+        LayerNorm::LayerNorm(MetaDesc& desc, const torch::Tensor& gamma, const torch::Tensor& beta):
             desc_(desc),
             layernorm_weights_(gamma.data_ptr()),
             layernorm_bias_(beta.data_ptr()){

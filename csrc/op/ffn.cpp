@@ -8,7 +8,7 @@ namespace eet
 {
     namespace op
     {
-        FeedForwardNetwork::FeedForwardNetwork(MetaDesc desc,
+        FeedForwardNetwork::FeedForwardNetwork(MetaDesc& desc,
                             const torch::Tensor& Intermediate_weights,
                             const torch::Tensor& Intermediate_bias,
                             const torch::Tensor& Output_weights,

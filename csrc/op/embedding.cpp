@@ -7,7 +7,7 @@ namespace eet
 {
     namespace op
     {
-        Embedding::Embedding(MetaDesc desc, 
+        Embedding::Embedding(MetaDesc& desc, 
                             const torch::Tensor &embedding_weights, 
                             const torch::Tensor &position_weights, 
                             const torch::Tensor &token_type_weights,

@@ -1,15 +1,16 @@
-#include "op/t5ffn.hpp"
+#include "op/t5ffn_int8.hpp"
 #include "op/cublasLt_wrappers.hpp"
 #include "core/add_bias.cuh"
 #include "core/layer_norm.cuh"
 #include "core/gpt2_self_softmax.cuh"
 #include "core/activation_kernel.cuh"
 
+#define use_autotune true
 namespace eet
 {
     namespace op
     {
-        T5FeedForwardNetwork::T5FeedForwardNetwork(MetaDesc& desc,
+        T5FeedForwardNetworkInt8::T5FeedForwardNetworkInt8(MetaDesc& desc,
                             const torch::Tensor& Intermediate_0_weights,
                             const torch::Tensor& Intermediate_0_bias,
                             const torch::Tensor& Intermediate_1_weights,
@@ -59,38 +60,32 @@ namespace eet
             MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, ffn_cache_name_);
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * d_ff_, desc_.dtype_, desc_.options_, "t5ffn_buffer1");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * d_ff_, desc_.dtype_, desc_.options_, "t5ffn_buffer2");
-// #ifdef _AUTOTUNE_
-#ifdef VERSION_INFO
-            torch::TensorOptions tmp = torch::TensorOptions().dtype(torch::kInt8).device("cuda:0").requires_grad(false);
-            Buffer &workspace = MManager::get_instance().get_cache(WORKSPACE_SIZE, torch::kInt8, tmp, "workspace");
-            workspace_ = workspace.data_ptr();
-            workspace_size_ = WORKSPACE_SIZE;
-#endif
+            check_cuda_error(cudaMalloc((void **)&int8_intermediate_0_weights_, sizeof(int8_t) * desc_.hidden_units_ * d_ff_));
+            check_cuda_error(cudaMalloc((void **)&int8_intermediate_1_weights_, sizeof(int8_t) * desc_.hidden_units_ * d_ff_));
+            check_cuda_error(cudaMalloc((void **)&int8_output_weights_, sizeof(int8_t) * d_ff_ * desc_.hidden_units_));
+            transform_int8_weight(desc_.ltHandle, (int8_t* )intermediate_0_weights_, int8_intermediate_0_weights_, d_ff_, desc_.hidden_units_);
+            transform_int8_weight(desc_.ltHandle, (int8_t* )intermediate_1_weights_, int8_intermediate_1_weights_, d_ff_, desc_.hidden_units_);
+            transform_int8_weight(desc_.ltHandle, (int8_t* )output_weights_, int8_output_weights_, desc_.hidden_units_, d_ff_);
+
             switch (desc_.dtype_)
             {
             case torch::kFloat32:
                 alpha_ = new float();
                 beta_ = new float();
-                fc3_beta_ = new float();
                 *((float *)alpha_) = 1.0f;
                 *((float *)beta_) = 0.0f;
-                *((float *)fc3_beta_) = 1.0f;
                 break;
             case torch::kFloat16:
                 alpha_ = new half();
                 beta_ = new half();
-                fc3_beta_ = new half();
                 *((half *)alpha_) = (half)1.0f;
                 *((half *)beta_) = (half)0.0f;
-                *((half *)fc3_beta_) = (half)1.0f;
                 break;
             case torch::kBFloat16:
                 alpha_ = new float();
                 beta_ = new float();
-                fc3_beta_ = new float();
                 *((float *)alpha_) = 1.0f;
                 *((float *)beta_) = 0.0f;
-                *((float *)fc3_beta_) = 1.0f;
                 break;
             //TODO
             case torch::kInt8:
@@ -98,11 +93,11 @@ namespace eet
             }
         }
 
-        torch::Tensor T5FeedForwardNetwork::forward(torch::Tensor &input,
+        torch::Tensor T5FeedForwardNetworkInt8::forward(torch::Tensor &input,
                                                     bool pre_layernorm,
                                                     bool add_residual)
         {
-            assert((input.dtype() == desc_.dtype_) && "input's dtype is not the same as T5FeedForwardNetwork's dtype");
+            assert((input.dtype() == desc_.dtype_) && "input's dtype is not the same as T5FeedForwardNetworkInt8's dtype");
             cur_batch_size_ = input.sizes()[0];
             cur_seq_len_ = input.sizes()[1];
 
@@ -123,18 +118,18 @@ namespace eet
 
             Buffer &output = MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, ffn_cache_name_);
 
-            fc3_mul(ffn_inner_gelu, output, input);
+            fc3_mul(ffn_inner_gelu, output);
 
             ffn_inner_gelu.free();
-            if (!fc3_algo_.first)
-                add_input_bias_layernorm(output, input, pre_layernorm, add_residual);
+
+            add_input_bias_layernorm(output, input, pre_layernorm, add_residual);
 
             auto res = torch::from_blob(output.data_ptr(), input.sizes(), input.strides(), desc_.options_);
             return std::move(res);
         }
 
         // layerNorm
-        void T5FeedForwardNetwork::layer_norm(const torch::Tensor& input_tensor, Buffer& layernorm_tensor)
+        void T5FeedForwardNetworkInt8::layer_norm(const torch::Tensor& input_tensor, Buffer& layernorm_tensor)
         {
             const int m = cur_batch_size_ * cur_seq_len_;
             int n = desc_.hidden_units_;
@@ -150,47 +145,23 @@ namespace eet
 #endif
         }
 
-        void T5FeedForwardNetwork::fc1_mul(void* input, Buffer &ffn_inner)
+        void T5FeedForwardNetworkInt8::fc1_mul(void* input, Buffer &ffn_inner)
         {
             const int m = cur_batch_size_ * cur_seq_len_;
             int k = desc_.hidden_units_ ;
             int n = d_ff_;
 
-            if (fc1_mnk_ != std::vector<int> {n, m, k}) {
-                fc1_algo_ = desc_.getAlgo(n, m, k);
-                fc1_mnk_ = std::vector<int> {n, m, k};
-            }
-#ifdef _AUTOTUNE_
-            fc1_algo_.first = true;
-#endif
-            if (fc1_algo_.first) {
-                cublasLtgemm(desc_.ltHandle,
-                            CUBLAS_OP_N, CUBLAS_OP_N,
-                            n, m, k,
-                            alpha_,
-                            intermediate_0_weights_, n,
-                            input, k,
-                            beta_,
-                            ffn_inner.data_ptr(), n,
-                            desc_.dataType_,
-                            desc_.scaleType_,
-                            desc_.computeType_, fc1_algo_.second,
-                            workspace_, workspace_size_, desc_.stream);
-            } else {
-                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                              CUBLAS_OP_N, CUBLAS_OP_N,
-                                              n, m, k,
-                                              alpha_,
-                                              intermediate_0_weights_, desc_.dataType_, n,
-                                              input, desc_.dataType_, k,
-                                              beta_,
-                                              ffn_inner.data_ptr(), desc_.dataType_, n,
-                                              desc_.computeType_,
-                                              CUBLAS_GEMM_DEFAULT));
-            }
-#ifdef _AUTOTUNE_
-            desc_.saveAlgo(n, m, k, fc1_algo_.second);
-#endif
+            cublasLtIgemm(desc_.ltHandle,
+                          m, n, k,
+                          alpha_,
+                          (int8_t* )input,
+                          int8_intermediate_0_weights_,
+                          beta_,
+                          (int32_t* )ffn_inner.data_ptr(),
+                          desc_.dataType_,
+                          desc_.scaleType_,
+                          desc_.computeType_,
+                          workspace_, 0, desc_.stream);
 
 #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
@@ -198,7 +169,7 @@ namespace eet
 #endif
         }
 
-        void T5FeedForwardNetwork::add_bias_act(Buffer& ffn_inner)
+        void T5FeedForwardNetworkInt8::add_bias_act(Buffer& ffn_inner)
         {
             int m = cur_batch_size_ * cur_seq_len_;
             int n = d_ff_;
@@ -211,7 +182,7 @@ namespace eet
 #endif
         }
 
-        void T5FeedForwardNetwork::gated_gelu(Buffer& inner_gelu, Buffer& inner_linear)
+        void T5FeedForwardNetworkInt8::gated_gelu(Buffer& inner_gelu, Buffer& inner_linear)
         {
             int m = cur_batch_size_ * cur_seq_len_;
             int n = d_ff_;
@@ -224,49 +195,23 @@ namespace eet
 #endif
         }
 
-        void T5FeedForwardNetwork::fc2_mul(void* input, Buffer &ffn_inner)
+        void T5FeedForwardNetworkInt8::fc2_mul(void* input, Buffer &ffn_inner)
         {
             const int m = cur_batch_size_ * cur_seq_len_;
             int k = desc_.hidden_units_ ;
             int n = d_ff_;
 
-            if (fc2_mnk_ != std::vector<int> {n, m, k}) {
-                fc2_algo_ = desc_.getAlgo(n, m, k);
-                fc2_mnk_ = std::vector<int> {n, m, k};
-            }
-#ifdef _AUTOTUNE_
-            fc2_algo_.first = true;
-#endif
-            if (fc2_algo_.first) {
-                cublasLtgemm(desc_.ltHandle,
-                             CUBLAS_OP_N, CUBLAS_OP_N,
-                             n, m, k,
-                             alpha_,
-                             intermediate_1_weights_, n,
-                             input, k,
-                             beta_,
-                             ffn_inner.data_ptr(), n,
-                             desc_.dataType_,
-                             desc_.scaleType_,
-                             desc_.computeType_, fc2_algo_.second,
-                             workspace_, workspace_size_, desc_.stream);
-            }
-            else
-            {
-                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                              CUBLAS_OP_N, CUBLAS_OP_N,
-                                              n, m, k,
-                                              alpha_,
-                                              intermediate_1_weights_, desc_.dataType_, n,
-                                              input, desc_.dataType_, k,
-                                              beta_,
-                                              ffn_inner.data_ptr(), desc_.dataType_, n,
-                                              desc_.computeType_,
-                                              CUBLAS_GEMM_DEFAULT));
-            }
-#ifdef _AUTOTUNE_
-            desc_.saveAlgo(n, m, k, fc2_algo_.second);
-#endif
+            cublasLtIgemm(desc_.ltHandle,
+                          m, n, k,
+                          alpha_,
+                          (int8_t* )input,
+                          int8_intermediate_1_weights_,
+                          beta_,
+                          (int32_t* )ffn_inner.data_ptr(),
+                          desc_.dataType_,
+                          desc_.scaleType_,
+                          desc_.computeType_,
+                          workspace_, 0, desc_.stream);
 
 #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
@@ -274,51 +219,24 @@ namespace eet
 #endif
         }
 
-        void T5FeedForwardNetwork::fc3_mul(const Buffer& ffn_inner, Buffer& output, torch::Tensor& input_tensor)
+        void T5FeedForwardNetworkInt8::fc3_mul(const Buffer& ffn_inner, Buffer& output)
         { 
             const int m = cur_batch_size_ * cur_seq_len_;
             int n = desc_.hidden_units_ ;
             int k = d_ff_;
 
-            if (fc3_mnk_ != std::vector<int> {n, m, k}) {
-                fc3_algo_ = desc_.getAlgo(n, m, k);
-                fc3_mnk_ = std::vector<int> {n, m, k};
-            }
-#ifdef _AUTOTUNE_
-            fc3_algo_.first = true;
-#endif
-            if (fc3_algo_.first) {
-                cublasLtgemm(desc_.ltHandle,
-                             CUBLAS_OP_N, CUBLAS_OP_N,
-                             n, m, k,
-                             alpha_,
-                             output_weights_, n,
-                             ffn_inner.data_ptr(), k,
-                             fc3_beta_,
-                             output.data_ptr(), n,
-                             desc_.dataType_,
-                             desc_.scaleType_,
-                             desc_.computeType_, fc3_algo_.second,
-                             workspace_, workspace_size_, 
-                             desc_.stream, input_tensor.data_ptr());
-            }
-            else
-            {
-                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                              CUBLAS_OP_N, CUBLAS_OP_N,
-                                              n, m, k,
-                                              alpha_,
-                                              output_weights_, desc_.dataType_, n,
-                                              ffn_inner.data_ptr(), desc_.dataType_, k,
-                                              beta_,
-                                              output.data_ptr(), desc_.dataType_, n,
-                                              desc_.computeType_,
-                                              CUBLAS_GEMM_DEFAULT));
-            }
+            cublasLtIgemm(desc_.ltHandle,
+                          m, n, k,
+                          alpha_,
+                          (int8_t* )ffn_inner.data_ptr(),
+                          int8_output_weights_,
+                          beta_,
+                          (int32_t* )output.data_ptr(),
+                          desc_.dataType_,
+                          desc_.scaleType_,
+                          desc_.computeType_,
+                          workspace_, 0, desc_.stream);
             
-#ifdef _AUTOTUNE_
-            desc_.saveAlgo(n, m, k, fc3_algo_.second);
-#endif
 
 #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
@@ -326,7 +244,7 @@ namespace eet
 #endif
         }
 
-        void T5FeedForwardNetwork::add_input_bias_layernorm(Buffer& output,torch::Tensor& input,bool pre_layernorm, bool add_residual)
+        void T5FeedForwardNetworkInt8::add_input_bias_layernorm(Buffer& output,torch::Tensor& input,bool pre_layernorm, bool add_residual)
         {
             const int m = cur_batch_size_ * cur_seq_len_;
             int n = desc_.hidden_units_ ;
@@ -355,6 +273,27 @@ namespace eet
                     RUN_KERNEL(add_bias_kernel, desc_.dtype_, output.data_ptr(), output_bias_,m , n, desc_.stream);
                 }
             }
+        }
+
+        void T5FeedForwardNetworkInt8::transform_int8_weight(cublasLtHandle_t ltHandle, const int8_t* input_weight, int8_t* output_weight, int row, int col)
+        {
+            cublasLtOrder_t order_ROW = CUBLASLT_ORDER_ROW;
+            cublasLtOrder_t order_COL4_4R2_8C = CUBLASLT_ORDER_COL4_4R2_8C;
+            cublasLtMatrixTransformDesc_t transformDesc = NULL;
+            cublasLtMatrixLayout_t input_desc = NULL, output_desc = NULL;
+
+            int ldbtransform = 32 * roundoff(row, 8);
+            float transformAlpha = 1.0f, transformBeta = 0.0f;
+            check_cuda_error(cublasLtMatrixTransformDescCreate(&transformDesc, CUDA_R_32F));
+
+            // transform fc0 layout
+            cublasLtMatrixLayoutCreate(&input_desc, CUDA_R_8I, row, col, col);
+            cublasLtMatrixLayoutSetAttribute(input_desc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_ROW, sizeof(order_ROW));
+            cublasLtMatrixLayoutCreate(&output_desc, CUDA_R_8I, row, col, ldbtransform);
+            cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, input_weight, input_desc, &transformBeta, NULL, NULL, output_weight, output_desc, 0);
+            cublasLtMatrixLayoutDestroy(input_desc);
+            cublasLtMatrixLayoutDestroy(output_desc);
+            cublasLtMatrixTransformDescDestroy(transformDesc);
         }
     } // namespace op
 } // namespace eet

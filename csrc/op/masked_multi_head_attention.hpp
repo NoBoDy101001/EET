@@ -11,7 +11,7 @@ namespace eet{
 
         class MaskedMultiHeadAttention : public OpBase{
         public:
-            MaskedMultiHeadAttention(MetaDesc desc,
+            MaskedMultiHeadAttention(MetaDesc& desc,
                                     const torch::Tensor& QKV_weights,
                                     const torch::Tensor& Q_bias,
                                     const torch::Tensor& K_bias,
@@ -66,7 +66,7 @@ namespace eet{
 
             void add_relative_attn_bias(Buffer &qk_buf, void* relative_attention_bias);
 
-            void qk_softmax(Buffer& qk_buf,const int64_t *padding_len);
+            void qk_softmax(Buffer& qk_buf, void* relative_attention_bias, const int64_t *padding_len);
 
             void attn_v_mul(const Buffer& qk_buf, const Buffer& v_buf,
                             Buffer& transpose_dst);
@@ -87,10 +87,11 @@ namespace eet{
 
             void kv_transpose(torch::Tensor& d_K_buf, torch::Tensor& d_V_buf,Buffer& K_buf,Buffer& V_buf);
             
-            MetaDesc desc_;
+            MetaDesc& desc_;
             // torch::Tensor output_;
             torch::Tensor k_cache_, v_cache_;
-            cublasGemmAlgo_t qkv_weights_algo_, q_k_algo_, attn_v_algo_;
+            std::vector<int> qkv_mnk_ = {0, 0, 0}, o_mnk_ = {0, 0, 0};
+            std::pair<bool, cublasLtMatmulAlgo_t> qkv_algo_, o_algo_;
 
             bool with_bias_;
             int cur_batch_size_;
@@ -101,10 +102,12 @@ namespace eet{
             int step_;
             void* alpha_;
             void* beta_;
+            void* o_beta_;
             void* atten_scaler_;
             void** qkv_input_;
             void** qkv_kernel_;
             void** qkv_buf_;
+            int workspace_size_ = 0;
 
         private:
             void* qkv_weights_;
@@ -115,7 +118,7 @@ namespace eet{
             void* output_bias_;
             void* layernorm_weights_;
             void* layernorm_bias_;
-
+            void* workspace_ = nullptr;
         };
     }
 }

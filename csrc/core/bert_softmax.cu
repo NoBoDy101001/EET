@@ -157,6 +157,7 @@ __global__ void softmax_kernel_t5(T *qk_buf, T *position_bias, const int64_t *pa
     right_padding_len = padding_len[batch_id];
   }
 
+#pragma unroll
   for (int i = 0; i < seq_len - right_padding_len; ++i)
   {
     float qk = threadIdx.x < seq_len ? static_cast<float>(qk_buf[threadIdx.x + qk_offset]) + static_cast<float>(position_bias[threadIdx.x + bias_offset]) : 0.0f;
@@ -235,6 +236,7 @@ template <class T>
 void bert_softmax_kernel(void *qk_buf, void* position_bias, const int64_t *padding_len, const int &batch_size, const int &head_num,
                          const int &seq_len, bool need_sequence_mask, const cudaStream_t stream)
 {
+  assert(seq_len <= 1024);
   dim3 grid, block;
 
   if (seq_len <= 32)

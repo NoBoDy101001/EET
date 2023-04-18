@@ -1,13 +1,19 @@
+#include <iostream>
 #include <stdio.h>
+#include <algorithm>
+#include <assert.h>
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <cuda_bf16.h>
 
+static const float HALF_FLT_MAX = 65504.F;
 #define FINAL_MASK 0xffffffff
 
 template <typename T>
 __inline__ __device__
 T warpReduceSum(T val)
 {
-  #pragma unroll
+#pragma unroll
   for(int mask = 16; mask > 0; mask >>= 1)
     val += __shfl_xor_sync(FINAL_MASK, val, mask, 32);
   return val;
@@ -18,9 +24,11 @@ __inline__ __device__
 T warpReduceSum_opt(T* val)
 {
     T sum_in_thread = 0;
+#pragma unroll
     for (int i = 0 ; i < item_per_thread; i++){
         sum_in_thread += val[i];
     }
+#pragma unroll
     for(int mask = 16; mask > 0; mask >>= 1)
         sum_in_thread += __shfl_xor_sync(FINAL_MASK, sum_in_thread, mask, 32);
     return sum_in_thread;
@@ -78,7 +86,7 @@ template <typename T>
   __inline__ __device__
 T warpReduceMax(T val)
 {
-  #pragma unroll
+#pragma unroll
   for(int mask = 16; mask > 0; mask >>= 1)
     val = max(val, __shfl_xor_sync(FINAL_MASK, val, mask, 32));
   return val;
@@ -112,9 +120,11 @@ __inline__ __device__
 T warpReduceMax_opt(T* val)
 {
     T max_val = val[0];
+#pragma unroll
     for (int i = 0 ; i < item_per_thread; i++){
         max_val = val[i] > max_val?val[i]:max_val;
     }
+#pragma unroll
     for(int mask = 16; mask > 0; mask >>= 1)
         max_val = max(max_val, __shfl_xor_sync(FINAL_MASK, max_val, mask, 32));
     return max_val;
@@ -152,7 +162,24 @@ int target_index(int id1, int id2, int id3, int id4, int dim_1, int dim_2, int d
   return id1 * (dim_2 * dim_3 * dim_4) + id3 * (dim_2 * dim_4) + id2 * dim_4 + id4;
 }
 
+template<typename T>
+__device__ __forceinline__ T clamp_inf_for_half(const float input)
+{
+    return input;
+}
 
+template<>
+__device__ __forceinline__ half clamp_inf_for_half(const float input)
+{
+    // clamp inf values to enable fp16
+    return input > 0.0f ? (half)min(input, HALF_FLT_MAX - 1000) : (half)max(input, -HALF_FLT_MAX + 1000);
+}
+
+template<>
+__device__ __forceinline__ __nv_bfloat16 clamp_inf_for_half(const float input)
+{
+    return __float2bfloat16(input);
+}
 
 // __inline__ void sequence_kernel(int64_t* data_ptr, int64_t size) {
 //   thrust::device_ptr<int64_t> data_dev_ptr = thrust::device_pointer_cast(data_ptr);

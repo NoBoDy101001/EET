@@ -1,4 +1,5 @@
 #include "op/cross_multi_head_attention.hpp"
+#include "op/cublasLt_wrappers.hpp"
 #include "core/add_bias.cuh"
 #include "core/transpose.cuh"
 #include "core/layer_norm.cuh"
@@ -8,7 +9,7 @@
 #include <iostream>
 namespace eet{
     namespace op{
-        CrossMultiHeadAttention::CrossMultiHeadAttention(MetaDesc desc,
+        CrossMultiHeadAttention::CrossMultiHeadAttention(MetaDesc& desc,
                                     const torch::Tensor& Q_weights,
                                     const torch::Tensor& K_weights,
                                     const torch::Tensor& V_weights,
@@ -44,38 +45,42 @@ namespace eet{
             value_mem_cache_ = torch::zeros_like(key_mem_cache_);
             // attn_out_cache_ = torch::zeros({desc_.batch_size_, desc_.head_num_, 1, desc_.max_full_seq_len_}, desc_.options_);
             MManager::get_instance().get_cache(desc_.batch_size_ * 1 * desc_.hidden_units_, desc_.dtype_, desc_.options_, "cross_attn_cache");                  // TODO cur_seq_len_
-
-            switch(desc_.dtype_){
-                case torch::kFloat32:
-                    qkv_weights_algo_ = CUBLAS_GEMM_DEFAULT;
-                    q_k_algo_ = CUBLAS_GEMM_DEFAULT;
-                    attn_v_algo_ = CUBLAS_GEMM_DEFAULT;
-                    alpha_ = new float();
-                    beta_  = new float();
-                    *((float*)alpha_) = 1.0f;
-                    *((float*)beta_)  = 0.0f;
-                    break;
-                case torch::kFloat16:
-                    qkv_weights_algo_ = CUBLAS_GEMM_DEFAULT;
-                    q_k_algo_ = CUBLAS_GEMM_DEFAULT;
-                    attn_v_algo_ = CUBLAS_GEMM_DEFAULT;
-                    alpha_ = new half();
-                    beta_  = new half();
-                    *((half*)alpha_) = (half)1.0f;
-                    *((half*)beta_)  = (half)0.0f;
-                    break;
-                case torch::kBFloat16:
-                    qkv_weights_algo_ = CUBLAS_GEMM_DEFAULT;
-                    q_k_algo_ = CUBLAS_GEMM_DEFAULT;
-                    attn_v_algo_ = CUBLAS_GEMM_DEFAULT;
-                    alpha_ = new float();
-                    beta_  = new float();
-                    *((float*)alpha_) = 1.0f;
-                    *((float*)beta_)  = 0.0f;
-                    break;
-                //TODO
-                case torch::kInt8:
-                    break;
+// #ifdef _AUTOTUNE_
+#ifdef VERSION_INFO
+            torch::TensorOptions tmp = torch::TensorOptions().dtype(torch::kInt8).device("cuda:0").requires_grad(false);
+            Buffer &workspace = MManager::get_instance().get_cache(WORKSPACE_SIZE, torch::kInt8, tmp, "workspace");
+            workspace_ = workspace.data_ptr();
+            workspace_size_ = WORKSPACE_SIZE;
+#endif
+            switch (desc_.dtype_)
+            {
+            case torch::kFloat32:
+                alpha_ = new float();
+                beta_ = new float();
+                o_beta_ = new float();
+                *((float *)alpha_) = 1.0f;
+                *((float *)beta_) = 0.0f;
+                *((float *)o_beta_) = 1.0f;
+                break;
+            case torch::kFloat16:
+                alpha_ = new half();
+                beta_ = new half();
+                o_beta_ = new half();
+                *((half *)alpha_) = (half)1.0f;
+                *((half *)beta_) = (half)0.0f;
+                *((half *)o_beta_) = (half)1.0f;
+                break;
+            case torch::kBFloat16:
+                alpha_ = new float();
+                beta_ = new float();
+                o_beta_ = new float();
+                *((float *)alpha_) = 1.0f;
+                *((float *)beta_) = 0.0f;
+                *((float *)o_beta_) = 1.0f;
+                break;
+            //TODO
+            case torch::kInt8:
+                break;
             }
         }
 
@@ -268,16 +273,42 @@ namespace eet{
             const int m = cur_batch_size_ * cur_seq_len_;
             const int k = desc_.hidden_units_;
             const int n = inner_dim_;
-            check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                          CUBLAS_OP_N, CUBLAS_OP_N,
-                                          n, m, k,
-                                          alpha_,
-                                          q_weights_, desc_.dataType_, n,
-                                          input, desc_.dataType_, k,
-                                          beta_,
-                                          q_buffer.data_ptr(), desc_.dataType_, n,
-                                          desc_.computeType_,
-                                          qkv_weights_algo_));
+
+            if (q_mnk_ != std::vector<int> {n, m, k}) {
+                q_algo_ = desc_.getAlgo(n, m, k);
+                q_mnk_ = std::vector<int> {n, m, k};
+            }
+#ifdef _AUTOTUNE_
+            q_algo_.first = true;
+#endif
+            if (q_algo_.first) {
+                cublasLtgemm(desc_.ltHandle,
+                            CUBLAS_OP_N, CUBLAS_OP_N,
+                            n, m, k,
+                            alpha_,
+                            q_weights_, n,
+                            input, k,
+                            beta_,
+                            q_buffer.data_ptr(), n,
+                            desc_.dataType_,
+                            desc_.scaleType_,
+                            desc_.computeType_, q_algo_.second,
+                            workspace_, workspace_size_, desc_.stream);
+            } else {
+                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
+                                            CUBLAS_OP_N, CUBLAS_OP_N,
+                                            n, m, k,
+                                            alpha_,
+                                            q_weights_, desc_.dataType_, n,
+                                            input, desc_.dataType_, k,
+                                            beta_,
+                                            q_buffer.data_ptr(), desc_.dataType_, n,
+                                            desc_.computeType_,
+                                            CUBLAS_GEMM_DEFAULT));
+            }
+#ifdef _AUTOTUNE_
+            desc_.saveAlgo(n, m, k, q_algo_.second);
+#endif
 
 #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
@@ -294,46 +325,114 @@ namespace eet{
             int m = cur_batch_size_ * cur_seq_len_;
             const int k = desc_.hidden_units_;
             const int n = inner_dim_;
-            check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                          CUBLAS_OP_N, CUBLAS_OP_N,
-                                          n, m, k,
-                                          alpha_,
-                                          q_weights_, desc_.dataType_, n,
-                                          input, desc_.dataType_, k,
-                                          beta_,
-                                          q_buffer.data_ptr(), desc_.dataType_, n,
-                                          desc_.computeType_,
-                                          qkv_weights_algo_));
-#ifdef _DEBUG_MODE_
-            cudaDeviceSynchronize();
-            check_cuda_error(cudaGetLastError());
+
+            if (q_mnk_ != std::vector<int> {n, m, k}) {
+                q_algo_ = desc_.getAlgo(n, m, k);
+                q_mnk_ = std::vector<int> {n, m, k};
+            }
+#ifdef _AUTOTUNE_
+            q_algo_.first = true;
 #endif
-            m = cur_batch_size_ * mem_seq_len_;
-            check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                          CUBLAS_OP_N, CUBLAS_OP_N,
-                                          n, m, k,
-                                          alpha_,
-                                          k_weights_, desc_.dataType_, n,
-                                          memory.data_ptr(), desc_.dataType_, k,
-                                          beta_,
-                                          k_buffer.data_ptr(), desc_.dataType_, n,
-                                          desc_.computeType_,
-                                          qkv_weights_algo_));
+            if (q_algo_.first) {
+                cublasLtgemm(desc_.ltHandle,
+                            CUBLAS_OP_N, CUBLAS_OP_N,
+                            n, m, k,
+                            alpha_,
+                            q_weights_, n,
+                            input, k,
+                            beta_,
+                            q_buffer.data_ptr(), n,
+                            desc_.dataType_,
+                            desc_.scaleType_,
+                            desc_.computeType_, q_algo_.second,
+                            workspace_, workspace_size_, desc_.stream);
+            } else {
+                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
+                                            CUBLAS_OP_N, CUBLAS_OP_N,
+                                            n, m, k,
+                                            alpha_,
+                                            q_weights_, desc_.dataType_, n,
+                                            input, desc_.dataType_, k,
+                                            beta_,
+                                            q_buffer.data_ptr(), desc_.dataType_, n,
+                                            desc_.computeType_,
+                                            CUBLAS_GEMM_DEFAULT));
+            }
+#ifdef _AUTOTUNE_
+            desc_.saveAlgo(n, m, k, q_algo_.second);
+#endif
 
 #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
             check_cuda_error(cudaGetLastError());
 #endif
-            check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                          CUBLAS_OP_N, CUBLAS_OP_N,
-                                          n, m, k,
-                                          alpha_,
-                                          v_weights_, desc_.dataType_, n,
-                                          memory.data_ptr(), desc_.dataType_, k,
-                                          beta_,
-                                          v_buffer.data_ptr(), desc_.dataType_, n,
-                                          desc_.computeType_,
-                                          qkv_weights_algo_));
+            m = cur_batch_size_ * mem_seq_len_;
+            if (kv_mnk_ != std::vector<int> {n, m, k}) {
+                kv_algo_ = desc_.getAlgo(n, m, k);
+                kv_mnk_ = std::vector<int> {n, m, k};
+            }
+#ifdef _AUTOTUNE_
+            kv_algo_.first = true;
+#endif
+            if (kv_algo_.first) {
+                cublasLtgemm(desc_.ltHandle,
+                            CUBLAS_OP_N, CUBLAS_OP_N,
+                            n, m, k,
+                            alpha_,
+                            k_weights_, n,
+                            memory.data_ptr(), k,
+                            beta_,
+                            k_buffer.data_ptr(), n,
+                            desc_.dataType_,
+                            desc_.scaleType_,
+                            desc_.computeType_, kv_algo_.second,
+                            workspace_, workspace_size_, desc_.stream);
+            } else {
+                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
+                                            CUBLAS_OP_N, CUBLAS_OP_N,
+                                            n, m, k,
+                                            alpha_,
+                                            k_weights_, desc_.dataType_, n,
+                                            memory.data_ptr(), desc_.dataType_, k,
+                                            beta_,
+                                            k_buffer.data_ptr(), desc_.dataType_, n,
+                                            desc_.computeType_,
+                                            CUBLAS_GEMM_DEFAULT));
+            }
+
+#ifdef _DEBUG_MODE_
+            cudaDeviceSynchronize();
+            check_cuda_error(cudaGetLastError());
+#endif
+            if (kv_algo_.first) {
+                cublasLtgemm(desc_.ltHandle,
+                            CUBLAS_OP_N, CUBLAS_OP_N,
+                            n, m, k,
+                            alpha_,
+                            v_weights_, n,
+                            memory.data_ptr(), k,
+                            beta_,
+                            v_buffer.data_ptr(), n,
+                            desc_.dataType_,
+                            desc_.scaleType_,
+                            desc_.computeType_, kv_algo_.second,
+                            workspace_, workspace_size_, desc_.stream);
+            } else {
+                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
+                                            CUBLAS_OP_N, CUBLAS_OP_N,
+                                            n, m, k,
+                                            alpha_,
+                                            v_weights_, desc_.dataType_, n,
+                                            memory.data_ptr(), desc_.dataType_, k,
+                                            beta_,
+                                            v_buffer.data_ptr(), desc_.dataType_, n,
+                                            desc_.computeType_,
+                                            CUBLAS_GEMM_DEFAULT));
+            }
+
+#ifdef _AUTOTUNE_
+            desc_.saveAlgo(n, m, k, kv_algo_.second);
+#endif
 
 #ifdef _DEBUG_MODE_
             cudaDeviceSynchronize();
@@ -359,7 +458,7 @@ namespace eet{
 
         void CrossMultiHeadAttention::q_k_mul(const Buffer& q_buf, const Buffer& k_buf,
                                                 Buffer& qk_buf){
-            check_cuda_error(cublasGemmStridedBatchedEx(MetaDesc::cublasHandle,
+            check_cuda_error(cublasGemmStridedBatchedEx(desc_.cublasHandle,
                 CUBLAS_OP_T, CUBLAS_OP_N,
                 mem_seq_len_, cur_seq_len_, size_per_head_,
                 alpha_,
@@ -369,7 +468,7 @@ namespace eet{
                 qk_buf.data_ptr(), desc_.dataType_, mem_seq_len_, mem_seq_len_ * cur_seq_len_,
                 cur_batch_size_ * desc_.head_num_,
                 desc_.computeType_,
-                q_k_algo_));
+                CUBLAS_GEMM_DEFAULT));
 
 #ifdef _DEBUG_MODE_
     cudaDeviceSynchronize();
@@ -403,7 +502,7 @@ namespace eet{
                     transpose_dst.data_ptr(), desc_.dataType_, size_per_head_, cur_seq_len_ * size_per_head_,
                     cur_batch_size_ * desc_.head_num_,
                     desc_.computeType_,
-                    attn_v_algo_));
+                    CUBLAS_GEMM_DEFAULT));
 
 #ifdef _DEBUG_MODE_
     cudaDeviceSynchronize();
@@ -421,21 +520,50 @@ namespace eet{
 #endif
         }
 
-        void CrossMultiHeadAttention::project(const Buffer& dst,Buffer& res,torch::Tensor& input, bool pre_layernorm,bool add_residual){
+        void CrossMultiHeadAttention::project(const Buffer& dst, Buffer& res, torch::Tensor& input, bool pre_layernorm, bool add_residual){
             const int m = cur_batch_size_ * cur_seq_len_;
             int k = inner_dim_;
             int n = desc_.hidden_units_;
-            check_cuda_error(cublasGemmEx(desc_.cublasHandle,
-                                            CUBLAS_OP_N, CUBLAS_OP_N,
-                                            n, m, k,
-                                            alpha_,
-                                            output_weights_, desc_.dataType_, n,
-                                            dst.data_ptr(), desc_.dataType_, k,
-                                            beta_,
-                                            res.data_ptr(), desc_.dataType_, n,
-                                            desc_.computeType_,
-                                            qkv_weights_algo_));
-            if(add_residual)
+
+            if (o_mnk_ != std::vector<int> {n, m, k}) {
+                o_algo_ = desc_.getAlgo(n, m, k);
+                o_mnk_ = std::vector<int> {n, m, k};
+            }
+#ifdef _AUTOTUNE_
+            o_algo_.first = true;
+#endif
+            if (o_algo_.first) {
+                cublasLtgemm(desc_.ltHandle,
+                            CUBLAS_OP_N, CUBLAS_OP_N,
+                            n, m, k,
+                            alpha_,
+                            output_weights_, n,
+                            dst.data_ptr(), k,
+                            o_beta_,
+                            res.data_ptr(), n,
+                            desc_.dataType_,
+                            desc_.scaleType_,
+                            desc_.computeType_, o_algo_.second,
+                            workspace_, workspace_size_, 
+                            desc_.stream, input.data_ptr());
+            } else {
+                check_cuda_error(cublasGemmEx(desc_.cublasHandle,
+                                                CUBLAS_OP_N, CUBLAS_OP_N,
+                                                n, m, k,
+                                                alpha_,
+                                                output_weights_, desc_.dataType_, n,
+                                                dst.data_ptr(), desc_.dataType_, k,
+                                                beta_,
+                                                res.data_ptr(), desc_.dataType_, n,
+                                                desc_.computeType_,
+                                                CUBLAS_GEMM_DEFAULT));
+            }
+
+#ifdef _AUTOTUNE_
+            desc_.saveAlgo(n, m, k, o_algo_.second);
+#endif
+
+            if(add_residual && !o_algo_.first)
             {   
                 if(!pre_layernorm)
                 {   

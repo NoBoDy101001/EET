@@ -10,7 +10,7 @@ namespace eet{
 
         class FeedForwardNetwork : public OpBase{
         public:
-            FeedForwardNetwork(MetaDesc desc,
+            FeedForwardNetwork(MetaDesc& desc,
                             const torch::Tensor& Intermediate_weights,
                             const torch::Tensor& Intermediate_bias,
                             const torch::Tensor& Output_weights,
@@ -37,7 +37,7 @@ namespace eet{
 
             void add_input_bias_layernorm(Buffer& output,torch::Tensor& input_tensor,bool pre_layernorm, bool add_residual);
 
-            MetaDesc desc_;
+            MetaDesc& desc_;
             // torch::Tensor output_;
 
             cublasGemmAlgo_t fc1_algo_, fc2_algo_;

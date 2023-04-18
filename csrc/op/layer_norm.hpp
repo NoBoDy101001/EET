@@ -12,10 +12,10 @@ namespace eet
         class LayerNorm
         {
         public:
-            LayerNorm(MetaDesc desc, const torch::Tensor& gamma, const torch::Tensor& beta);
+            LayerNorm(MetaDesc& desc, const torch::Tensor& gamma, const torch::Tensor& beta);
             torch::Tensor layer_norm(const torch::Tensor& input_tensor);
         private:
-            MetaDesc desc_;
+            MetaDesc& desc_;
             torch::Tensor output_;
             void *layernorm_weights_;
             void *layernorm_bias_;

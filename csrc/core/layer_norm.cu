@@ -511,7 +511,7 @@ __global__ void decoder_norm1_kernel_opt(const nv_bfloat16 *__restrict input,
 }
 
 template <int item_per_thread>
-__global__ void T5norm1_kernel_opt(const float *__restrict input,
+__global__ void T5norm_kernel_opt(const float *__restrict input,
                                    const float *__restrict gamma,
                                    float *output,
                                    int m, int n)
@@ -553,7 +553,7 @@ __global__ void T5norm1_kernel_opt(const float *__restrict input,
 }
 
 template <int item_per_thread>
-__global__ void T5norm1_kernel_opt(const half *__restrict input,
+__global__ void T5norm_kernel_opt(const half *__restrict input,
                                    const half *__restrict gamma,
                                    half *output,
                                    int m, int n)
@@ -596,7 +596,7 @@ __global__ void T5norm1_kernel_opt(const half *__restrict input,
 }
 
 template <int item_per_thread>
-__global__ void T5norm1_kernel_opt(const nv_bfloat16 *__restrict input,
+__global__ void T5norm_kernel_opt(const nv_bfloat16 *__restrict input,
                                    const nv_bfloat16 *__restrict gamma,
                                    nv_bfloat16 *output,
                                    int m, int n)
@@ -700,31 +700,31 @@ void T5layernorm(const void *input, const void *gamma,
   {
     block.x = ceil(n / (32.0 * 1)) * 32;         // item_per_thread = 1
     block.x = block.x / (4 / sizeof(T)); // if using half, only need half of block.x
-    T5norm1_kernel_opt<1><<<grid, block, 0, stream>>>((T*)input, (T*)gamma, (T*)output, m, n);
+    T5norm_kernel_opt<1><<<grid, block, 0, stream>>>((T*)input, (T*)gamma, (T*)output, m, n);
   }
   else if (n <= 2048)
   {
     block.x = ceil(n / (32.0 * 2)) * 32;         // item_per_thread = 2
     block.x = block.x / (4 / sizeof(T)); // if using half, only need half of block.x
-    T5norm1_kernel_opt<2><<<grid, block, 0, stream>>>((T*)input, (T*)gamma, (T*)output, m, n);
+    T5norm_kernel_opt<2><<<grid, block, 0, stream>>>((T*)input, (T*)gamma, (T*)output, m, n);
   }
   else if (n <= 4096)
   {
     block.x = ceil(n / (32.0 * 4)) * 32;         // item_per_thread = 4
     block.x = block.x / (4 / sizeof(T)); // if using half, only need half of block.x
-    T5norm1_kernel_opt<4><<<grid, block, 0, stream>>>((T*)input, (T*)gamma, (T*)output, m, n);
+    T5norm_kernel_opt<4><<<grid, block, 0, stream>>>((T*)input, (T*)gamma, (T*)output, m, n);
   }
   else if (n <= 8192)
   {
     block.x = ceil(n / (32.0 * 8)) * 32;         // item_per_thread = 8
     block.x = block.x / (4 / sizeof(T)); // if using half, only need half of block.x
-    T5norm1_kernel_opt<8><<<grid, block, 0, stream>>>((T*)input, (T*)gamma, (T*)output, m, n);
+    T5norm_kernel_opt<8><<<grid, block, 0, stream>>>((T*)input, (T*)gamma, (T*)output, m, n);
   }
   else if (n <= 16384)
   {
     block.x = ceil(n / (32.0 * 16)) * 32;        // item_per_thread = 16
     block.x = block.x / (4 / sizeof(T)); // if using half, only need half of block.x
-    T5norm1_kernel_opt<16><<<grid, block, 0, stream>>>((T*)input,(T*)gamma, (T*)output, m, n);
+    T5norm_kernel_opt<16><<<grid, block, 0, stream>>>((T*)input,(T*)gamma, (T*)output, m, n);
   }
   else
   {

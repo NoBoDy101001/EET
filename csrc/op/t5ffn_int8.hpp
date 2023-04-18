@@ -1,5 +1,5 @@
-#ifndef _OP_T5FFN_HPP_
-#define _OP_T5FFN_HPP_
+#ifndef _OP_T5FFN_INT8_HPP_
+#define _OP_T5FFN_INT8_HPP_
 
 #include "op/common.hpp"
 #include "op/meta_desc.hpp"
@@ -8,9 +8,9 @@
 namespace eet{
     namespace op{
 
-        class T5FeedForwardNetwork : public OpBase{
+        class T5FeedForwardNetworkInt8 : public OpBase{
         public:
-            T5FeedForwardNetwork(MetaDesc& desc,
+            T5FeedForwardNetworkInt8(MetaDesc& desc,
                             const torch::Tensor& Intermediate_0_weights,
                             const torch::Tensor& Intermediate_0_bias,
                             const torch::Tensor& Intermediate_1_weights,
@@ -25,7 +25,7 @@ namespace eet{
                                     bool pre_layernorm,
                                     bool add_residual);
 
-            ~T5FeedForwardNetwork(){
+            ~T5FeedForwardNetworkInt8(){
             };
             
         private:
@@ -39,25 +39,24 @@ namespace eet{
 
             void add_bias_act(Buffer& ffn_inner);
 
-            void fc3_mul(const Buffer& ffn_inner, Buffer& output, torch::Tensor& input_tensor);
+            void fc3_mul(const Buffer& ffn_inner, Buffer& output);
 
             void add_input_bias_layernorm(Buffer& output,torch::Tensor& input_tensor,bool pre_layernorm, bool add_residual);
 
-            MetaDesc& desc_;
+            void transform_int8_weight(cublasLtHandle_t ltHandle, const int8_t* input_weight, int8_t* output_weight, int row, int col);
+
+            MetaDesc desc_;
             // torch::Tensor output_;
 
-            std::vector<int> fc1_mnk_ = {0, 0, 0}, fc2_mnk_ = {0, 0, 0}, fc3_mnk_ = {0, 0, 0};
-            std::pair<bool, cublasLtMatmulAlgo_t> fc1_algo_, fc2_algo_, fc3_algo_;
+            cublasGemmAlgo_t fc1_algo_, fc2_algo_, fc3_algo_;
             int act_type_;
             int cur_batch_size_;
             int cur_seq_len_;
             int size_per_head_;
             int d_ff_;
-            int workspace_size_ = 0;
 
             void* alpha_;
             void* beta_;
-            void* fc3_beta_;
 
             void* intermediate_0_weights_;
             void* intermediate_0_bias_;
@@ -69,6 +68,9 @@ namespace eet{
             void* layernorm_bias_;
             void* workspace_ = nullptr;
             std::string ffn_cache_name_;
+            int8_t* int8_intermediate_0_weights_;
+            int8_t* int8_intermediate_1_weights_;
+            int8_t* int8_output_weights_;
         };
     }
 }

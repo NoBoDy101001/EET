@@ -10,7 +10,7 @@ namespace eet{
 
         class MultiHeadAttention : public OpBase {
         public:
-            MultiHeadAttention(MetaDesc desc,
+            MultiHeadAttention(MetaDesc& desc,
                                     const torch::Tensor& QKV_weights,
                                     const torch::Tensor& Q_bias,
                                     const torch::Tensor& K_bias,
@@ -61,10 +61,10 @@ namespace eet{
                         bool pre_layernorm,
                         bool add_residual);
 
-            MetaDesc desc_;
+            MetaDesc& desc_;
             // torch::Tensor output_;
-            cublasGemmAlgo_t qkv_weights_algo_, q_k_algo_, attn_v_algo_;
-
+            std::vector<int> qkv_mnk_ = {0, 0, 0}, o_mnk_ = {0, 0, 0};
+            std::pair<bool, cublasLtMatmulAlgo_t> qkv_algo_, o_algo_;
             bool with_bias_;
             int cur_batch_size_;
             int cur_seq_len_;
@@ -72,8 +72,10 @@ namespace eet{
             int inner_dim_;
             void* alpha_;
             void* beta_;
+            void* o_beta_;
             void* atten_scaler_;
             int max_len_;
+            int workspace_size_ = 0;
 
         private:
             void* qkv_weights_;
@@ -84,6 +86,7 @@ namespace eet{
             void* output_bias_;
             void* layernorm_weights_;
             void* layernorm_bias_;
+            void* workspace_ = nullptr;
         };
     }
 }

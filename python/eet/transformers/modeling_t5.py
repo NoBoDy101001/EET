@@ -359,9 +359,11 @@ class EETT5Decoder():
 
 
 class EETT5Model():
-    def __init__(self, cfg, encoder, decoder):
+    def __init__(self, cfg, encoder, decoder, encoder_config, decoder_config):
         self.encoder = encoder
         self.decoder = decoder
+        self.encoder_config = encoder_config
+        self.decoder_config = decoder_config
         self.cfg = cfg
         self.pre_padding_len = torch.empty(0).long()
         self.decoder_pre_padding_len = torch.empty(0).long()
@@ -458,9 +460,8 @@ class EETT5Model():
         activation_fn = cfg.feed_forward_proj
         if cfg.feed_forward_proj == "gated-gelu":
             activation_fn = "gelu_new"
-        if hasattr(cfg, "n_positions"):
-            max_prompt_seq_len = cfg.n_positions
-            max_full_seq_len = cfg.n_positions
+
+
         batch_size = max_batch
         encoder_config = meta_desc(batch_size, cfg.num_heads, cfg.d_model, cfg.d_kv, cfg.d_ff, cfg.num_layers,
                                    max_prompt_seq_len, max_full_seq_len, data_type, device, False,
@@ -479,7 +480,7 @@ class EETT5Model():
 
         encoder = EETT5Encoder.from_torch(encoder_config, cfg, shared, encoder_position_embedding, encoder_final_layernorm, encoder_layer_model_dict, cfg.num_layers, data_type=data_type, bias=False)
         decoder = EETT5Decoder.from_torch(decoder_config, cfg, shared, decoder_position_embedding, decoder_final_layernorm, decoder_layer_model_dict, cfg.num_decoder_layers, data_type=data_type, bias=False)
-        eet_model = EETT5Model(cfg, encoder, decoder)
+        eet_model = EETT5Model(cfg, encoder, decoder, encoder_config, decoder_config)
 
         return eet_model
 
@@ -534,7 +535,7 @@ class EETT5Model():
 
         encoder = EETT5Encoder.from_torch(encoder_config, cfg, shared, encoder_position_embedding, encoder_final_layernorm, encoder_layer_model_dict, cfg.num_layers, data_type=data_type, bias=False)
         decoder = EETT5Decoder.from_torch(decoder_config, cfg, shared, decoder_position_embedding, decoder_final_layernorm, decoder_layer_model_dict, cfg.num_decoder_layers, data_type=data_type, bias=False)
-        eet_model = EETT5Model(cfg, encoder, decoder)
+        eet_model = EETT5Model(cfg, encoder, decoder, encoder_config, decoder_config)
 
         return eet_model       
 
