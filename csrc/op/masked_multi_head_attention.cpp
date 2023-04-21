@@ -57,6 +57,8 @@ namespace eet{
             workspace_size_ = WORKSPACE_SIZE;
 #endif
 
+            // MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "reorder_k_buf");
+            // MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "reorder_v_buf");
             switch (desc_.dtype_)
             {
             case torch::kFloat32:
@@ -231,8 +233,20 @@ namespace eet{
             cur_batch_size_ = input.sizes()[0];
             cur_seq_len_ = input.sizes()[1];
             assert(cur_seq_len_ == 1);
+            const int64_t *reorder_index = reorder_state.data_ptr<int64_t>();
+
             Buffer& qkv_buffer = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
                                     inner_dim_ * 3, desc_.dtype_, desc_.options_, false);
+
+            // Buffer& k_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                                        // inner_dim_, desc_.dtype_, desc_.options_, true);
+            // Buffer& v_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                                        // inner_dim_, desc_.dtype_, desc_.options_, true);
+            // if (reorder_index != nullptr) {
+                // cudaMemcpyAsync((void *)k_buf.data_ptr(), (void *)k_cache_.data_ptr(), size_t(k_cache_.element_size() * desc_.batch_size_ * step_ * inner_dim_), cudaMemcpyDeviceToDevice, desc_.stream);
+                // cudaMemcpyAsync((void *)v_buf.data_ptr(), (void *)v_cache_.data_ptr(), size_t(v_cache_.element_size() * desc_.batch_size_ * step_ * inner_dim_), cudaMemcpyDeviceToDevice, desc_.stream);
+            // }
+
             if(pre_layernorm)
             {
                 // pre_layerNorm
@@ -249,13 +263,8 @@ namespace eet{
                 qkv_weights_mul(input.data_ptr(), qkv_buffer);
             }
 
-            Buffer& context_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
-                                    inner_dim_, desc_.dtype_, desc_.options_, false);
-
-
             // masked_attention_dispatch
             const int64_t *padding_len = pre_padding_len.data_ptr<int64_t>();
-            const int64_t *reorder_index = reorder_state.data_ptr<int64_t>();
             void* relative_attention_bias_ = relative_attention_bias.data_ptr();
 
             if (reorder_index != nullptr) {
@@ -271,6 +280,8 @@ namespace eet{
                 // v_buf.free();
             }
 
+            Buffer& context_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * cur_seq_len_ *
+                                    inner_dim_, desc_.dtype_, desc_.options_, false);
             masked_attention(qkv_buffer, context_buf, padding_len, nullptr, relative_attention_bias_);
             qkv_buffer.free();
             
