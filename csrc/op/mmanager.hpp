@@ -15,7 +15,7 @@ namespace eet{
         Buffer(const int& size, const c10::ScalarType& dtype, const torch::TensorOptions options,std::string str = "no_name_"):
                 size_(size), dtype_(dtype), options_(options), str_(str) {
 
-            tensor_ = torch::ones(size, options_).contiguous();
+            tensor_ = torch::zeros(size, options_).contiguous();
             is_idle_ = false;
         }
 
@@ -28,10 +28,6 @@ namespace eet{
 
         torch::Tensor& get_tensor(){
             return tensor_;
-        }
-
-        void copy(torch::Tensor& tensor) {
-            tensor_.copy_(tensor);
         }
 
         //now we ignore the compare for dtype
