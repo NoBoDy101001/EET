@@ -129,13 +129,13 @@ class MetaDesc{
     const int max_seq_len_;
     const int max_full_seq_len_;
     const int layer_num_;
-    std::map<std::string, std::map<std::string, int>> algo_map_;
     std::string activation_fn_;
     torch::TensorOptions options_;
     cudaDataType_t dataType_, scaleType_;           // cuda dtype
     cublasComputeType_t computeType_;   // cublas type
     c10::ScalarType dtype_;             // torch dtype
 
+    static std::map<std::string, std::map<std::string, int>> algo_map_;
     static cublasHandle_t cublasHandle;
     static cublasLtHandle_t ltHandle;
     static cudaStream_t stream;
