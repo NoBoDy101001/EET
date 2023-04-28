@@ -148,7 +148,7 @@ class MetaDesc{
         assert(layer_num_ > 0 && "layer_num must > 0");
         assert(max_seq_len_ > 0 && "max_seq_len must > 0");
         assert(max_full_seq_len_ > 0 && "max_seq_len must > 0");
-        assert((options_.dtype() == torch::kFloat32 || options_.dtype() == torch::kFloat16 ||
+        assert((options_.dtype() == torch::kFloat32 || options_.dtype() == torch::kFloat16 || options_.dtype() == torch::kBFloat16 ||
         options_.dtype() == torch::kInt8) && "EET now only support float / half / bfloat16 / int8" );
         assert(options_.device().is_cuda() && "EET now only support CUDA");
         assert(options_.requires_grad() == false && "EET now only support inference");

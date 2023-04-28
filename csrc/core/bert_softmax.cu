@@ -265,7 +265,7 @@ void bert_softmax_kernel(void *qk_buf, void* position_bias, const int64_t *paddi
         softmax_kernel_bert<T><<<grid, block, 0, stream>>>((T *)qk_buf,padding_len, head_num, seq_len);
       }
     } else {
-      if (seq_len >= 64) {
+      if (batch_size * head_num <= 240) {
         grid.x = batch_size * head_num * seq_len;
         softmax_kernel_t5_opt<T><<<grid, block, 0, stream>>>((T *)qk_buf, (T*)position_bias, padding_len, head_num, seq_len);
       } else {

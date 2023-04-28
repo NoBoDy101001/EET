@@ -11,5 +11,5 @@ void layernorm(const void *input, const void *gamma,
 
 template <typename T>
 void T5layernorm(const void *input, const void *gamma,
-                 void *output, const int &m, const int &n,
+                 void *output, int m, int n,
                  const cudaStream_t stream);
