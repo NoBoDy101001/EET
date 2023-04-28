@@ -134,7 +134,9 @@ class MetaDesc{
     cudaDataType_t dataType_, scaleType_;           // cuda dtype
     cublasComputeType_t computeType_;   // cublas type
     c10::ScalarType dtype_;             // torch dtype
+    std::string algo_filename;
 
+    static std::string DEFAULT_DIR;
     static std::map<std::string, std::map<std::string, int>> algo_map_;
     static cublasHandle_t cublasHandle;
     static cublasLtHandle_t ltHandle;
@@ -169,24 +171,17 @@ class MetaDesc{
         return "";
     }
 
-    std::string getCurrentDirectory() {
-        char buffer[1024];
-        std::string currentDirectory = getcwd(buffer, 1024);
-        return currentDirectory;
-    }
 
     void loadAlgoMap(std::string suffix) {
-        std::string filename = getCurrentDirectory() + "/example/python/resource/eet_" + getGPUName() + suffix;
-#ifdef _AUTOTUNE_
-        setenv("GEMM_PATH", filename.c_str(), 1);
-#endif
+        algo_filename = DEFAULT_DIR + getGPUName() + suffix;
+
         FILE* fp;
-        fp = fopen(filename.c_str(), "r");
+        fp = fopen(algo_filename.c_str(), "r");
         if (fp == NULL) {
-            std::cout << "[EET][WARNING] " << filename << " is not found, using default config" << std::endl;
+            std::cout << "[EET][WARNING] " << algo_filename << " is not found, using default config" << std::endl;
             return;
         }
-        std::cout << "Get GEMM config from " << filename << std::endl;
+        std::cout << "Get GEMM config from " << algo_filename << std::endl;
         int m, n, k, algoId, tile, stages, numSplitsK, reductionScheme, swizzle, customOption;
         while (fscanf(fp, "%d %d %d %d %d %d %d %d %d %d", &m, &n, &k, &algoId, &tile, &stages, &numSplitsK, &reductionScheme, &swizzle, &customOption) == 10) {
             char mnk[32];
@@ -256,10 +251,9 @@ class MetaDesc{
             algo_map_[mnk]["customOption"] = customOption;
 
             FILE* fp;
-            const char* filename_cstr = getenv("GEMM_PATH");
-            fp = fopen(filename_cstr, "a+");
+            fp = fopen(algo_filename.c_str(), "a+");
             if (fp == NULL) {
-                std::cout << "[EET][WARNING] " << filename_cstr << " is not found, can not save gemm config" << std::endl;
+                std::cout << "[EET][WARNING] " << algo_filename << " is not found, can not save gemm config" << std::endl;
                 return;
             }
             fprintf(fp, "%d %d %d %d %d %d %d %d %d %d\n", m, n, k, algoId, tile, stages, numSplitsK, reductionScheme, swizzle, customOption);
