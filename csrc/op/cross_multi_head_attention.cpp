@@ -44,7 +44,7 @@ namespace eet{
             key_mem_cache_ = torch::zeros({desc_.batch_size_, desc_.max_seq_len_, inner_dim_}, desc_.options_);
             value_mem_cache_ = torch::zeros_like(key_mem_cache_);
             // attn_out_cache_ = torch::zeros({desc_.batch_size_, desc_.head_num_, 1, desc_.max_full_seq_len_}, desc_.options_);
-            MManager::get_instance().get_cache(desc_.batch_size_ * 1 * desc_.hidden_units_, desc_.dtype_, desc_.options_, "cross_attn_cache");                  // TODO cur_seq_len_
+            MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, "cross_attn_cache");                  // TODO cur_seq_len_
 // #ifdef _AUTOTUNE_
 #ifdef VERSION_INFO
             torch::TensorOptions tmp = torch::TensorOptions().dtype(torch::kInt8).device("cuda:0").requires_grad(false);

@@ -42,7 +42,7 @@ namespace eet{
             with_bias_ = q_bias_ != nullptr ? true : false;
             k_cache_ = torch::zeros({desc_.batch_size_ * desc_.max_full_seq_len_ * inner_dim_}, desc_.options_);          // each layer has kv cache
             v_cache_ = torch::zeros_like(k_cache_);
-            MManager::get_instance().get_cache(desc_.batch_size_ * 1 * desc_.hidden_units_, desc_.dtype_, desc_.options_, "self_mask_attn_cache");
+            MManager::get_instance().get_cache(desc_.batch_size_ * desc_.max_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, "self_mask_attn_cache");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * inner_dim_ * 3, desc_.dtype_, desc_.options_, "qkv_full");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * desc_.hidden_units_, desc_.dtype_, desc_.options_, "layernorm");
             MManager::get_instance().allocate_buffer(desc_.batch_size_ * desc_.max_seq_len_ * inner_dim_, desc_.dtype_, desc_.options_, "q_buf");
@@ -227,7 +227,7 @@ namespace eet{
         {
             assert((input.dtype() == desc_.dtype_) && "input's dtype is not the same as MaskedMultiHeadAttention's dtype");
             step_ += 1;
-            assert(step_ <= desc_.max_seq_len_ && "Exceed the maximum step length");
+            // assert(step_ <= desc_.max_full_seq_len_ && "Exceed the maximum step length");
             cur_batch_size_ = input.sizes()[0];
             cur_seq_len_ = input.sizes()[1];
             assert(cur_seq_len_ == 1);
@@ -259,16 +259,16 @@ namespace eet{
             void* relative_attention_bias_ = relative_attention_bias.data_ptr();
 
             if (reorder_index != nullptr) {
-                Buffer& k_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
-                                        inner_dim_, desc_.dtype_, desc_.options_, true);
-                Buffer& v_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
-                                        inner_dim_, desc_.dtype_, desc_.options_, true);
+                // Buffer& k_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                                        // inner_dim_, desc_.dtype_, desc_.options_, true);
+                // Buffer& v_buf = MManager::get_instance().get_buffer(desc_.batch_size_ * desc_.max_full_seq_len_ *
+                                        // inner_dim_, desc_.dtype_, desc_.options_, true);
 
-                k_buf.copy(k_cache_);
-                v_buf.copy(v_cache_);
-                reorder_cache(k_cache_, v_cache_, k_buf, v_buf, reorder_index);     //TODO 需要申请buffer缓存中间结果
-                k_buf.free();
-                v_buf.free();
+                // k_buf.copy(k_cache_);
+                // v_buf.copy(v_cache_);
+                reorder_cache(k_cache_, v_cache_, k_cache_, v_cache_, reorder_index);     //TODO 需要申请buffer缓存中间结果
+                // k_buf.free();
+                // v_buf.free();
             }
 
             masked_attention(qkv_buffer, context_buf, padding_len, nullptr, relative_attention_bias_);
