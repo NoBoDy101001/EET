@@ -25,7 +25,7 @@ namespace eet{
 
             std::vector<torch::Tensor> forward(torch::Tensor &input,
                                                torch::Tensor &memory,
-                                               const torch::Tensor &pre_padding_length,
+                                               const torch::Tensor &enc_pre_padding_length,
                                                const torch::Tensor &attention_reweight,
                                                bool pre_layernorm,
                                                bool add_residual,
@@ -35,7 +35,7 @@ namespace eet{
             // full decode
             std::vector<torch::Tensor> forward_full(torch::Tensor &input,
                                                     torch::Tensor &memory,
-                                                    const torch::Tensor &pre_padding_length,
+                                                    const torch::Tensor &enc_pre_padding_length,
                                                     const torch::Tensor &attention_reweight,
                                                     bool pre_layernorm,
                                                     bool add_residual);
@@ -75,7 +75,7 @@ namespace eet{
             const Buffer& k_buf, 
                             Buffer& qk_buf);
 
-            void qk_softmax(Buffer &qk_buf, const torch::Tensor &padding_index, const float *attention_reweight);
+            void qk_softmax(Buffer& qk_buf, const int64_t *padding_len, const float *attention_reweight);
 
             void attn_v_mul(const Buffer &qk_buf, const Buffer &v_buf,
                             Buffer &transpose_dst);

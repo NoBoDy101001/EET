@@ -86,7 +86,7 @@ namespace eet{
 
         std::vector<torch::Tensor> CrossMultiHeadAttention::forward(torch::Tensor& input,
                                     torch::Tensor& memory,
-                                    const torch::Tensor& pre_padding_length,
+                                    const torch::Tensor& enc_pre_padding_length,
                                     const torch::Tensor& attention_reweight,
                                     bool pre_layernorm,
                                     bool add_residual,
@@ -94,7 +94,7 @@ namespace eet{
                                     bool first_pass){
             if(first_pass)
             {
-                return forward_full(input,memory,pre_padding_length, attention_reweight, pre_layernorm,add_residual);
+                return forward_full(input, memory, enc_pre_padding_length, attention_reweight, pre_layernorm, add_residual);
             }
             else
             {
@@ -105,7 +105,7 @@ namespace eet{
         // full decoder
         std::vector<torch::Tensor> CrossMultiHeadAttention::forward_full(torch::Tensor& input,
                             torch::Tensor& memory,
-                            const torch::Tensor& pre_padding_length,
+                            const torch::Tensor& enc_pre_padding_length,
                             const torch::Tensor& attention_reweight,
                             bool pre_layernorm,
                             bool add_residual){
@@ -158,9 +158,10 @@ namespace eet{
             q_k_mul(q_buf, k_buf, qk_buf);
             q_buf.free();
 
+            const int64_t *padding_len = enc_pre_padding_length.data_ptr<int64_t>();
             //softmax
             const float *attn_reweight = attention_reweight.data_ptr<float>();
-            qk_softmax(qk_buf,pre_padding_length, attn_reweight);
+            qk_softmax(qk_buf, padding_len, attn_reweight);
             auto attn_output = torch::from_blob(qk_buf.data_ptr(), {cur_batch_size_, desc_.head_num_, cur_seq_len_, mem_seq_len_}, desc_.options_).clone();
 
             // transpose k\v cache
@@ -476,13 +477,12 @@ namespace eet{
 #endif
         }
 
-        void CrossMultiHeadAttention::qk_softmax(Buffer &qk_buf, const torch::Tensor &padding_index,
-                                                 const float *attention_reweight) {
+        void CrossMultiHeadAttention::qk_softmax(Buffer& qk_buf, const int64_t *padding_len, const float *attention_reweight) {
             float scalar = 1.0f;
             if (with_bias_)
                 scalar = 1 / sqrtf(size_per_head_ * 1.0f);
-            RUN_KERNEL(cross_softmax_kernel,desc_.dtype_,qk_buf.data_ptr(), attention_reweight, cur_batch_size_,
-                    desc_.head_num_,cur_seq_len_, mem_seq_len_, scalar, desc_.stream);
+            RUN_KERNEL(cross_softmax_kernel, desc_.dtype_, qk_buf.data_ptr(), attention_reweight, padding_len, cur_batch_size_,
+                       desc_.head_num_, cur_seq_len_, mem_seq_len_, scalar, desc_.stream);
 #ifdef _DEBUG_MODE_
     cudaDeviceSynchronize();
     check_cuda_error(cudaGetLastError());

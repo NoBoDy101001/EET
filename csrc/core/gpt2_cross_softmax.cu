@@ -11,17 +11,24 @@
 
 template <typename T>
 __global__
-void cross_softmax_kernel_opt(T *qk_buf_, const float* attention_reweight, const int head_num, const int seq_len,const int mem_seq_len, const T scalar)
+void cross_softmax_kernel_opt(T *qk_buf_, const float* attention_reweight, const int64_t *padding_len, const int head_num, const int seq_len,const int mem_seq_len, const T scalar)
 {
+    int batch_id = blockIdx.x / head_num;
     int qk_offset = blockIdx.x * seq_len * mem_seq_len;
 
     __shared__ float s_sum, s_max;
+    int right_padding_len = 0;
+    if (padding_len != nullptr)
+    {
+      right_padding_len = padding_len[batch_id];
+    }
 
+#pragma unroll
     for(int i = 0; i < seq_len; ++i)
     {
         float qk = threadIdx.x < mem_seq_len ? (float)qk_buf_[threadIdx.x + qk_offset] : 0.0f;
-
-        float tmp = threadIdx.x < mem_seq_len ? (float)(qk * (float)scalar): -1e20f;
+        float padding_val = (threadIdx.x >= mem_seq_len - right_padding_len) ? -1e20f : 0.0f;
+        float tmp = threadIdx.x < mem_seq_len ? (float)(qk * (float)scalar + padding_val): -1e20f;
 
         float max_val = blockReduceMax<float>(tmp);
 
@@ -53,7 +60,7 @@ void cross_softmax_kernel_opt(T *qk_buf_, const float* attention_reweight, const
 }
 
 template <class T>
-void cross_softmax_kernel(void *qk_buf_, const float *attention_reweight, const int &batch_size,
+void cross_softmax_kernel(void *qk_buf_, const float *attention_reweight, const int64_t *padding_len, const int &batch_size,
                           const int &head_num, const int &seq_len, const int &mem_seq_len, const float &scalar, const cudaStream_t stream)
 {
   dim3 grid, block;
@@ -72,12 +79,12 @@ void cross_softmax_kernel(void *qk_buf_, const float *attention_reweight, const 
     block.x = 1024;
 
   grid.x = batch_size * head_num;
-  cross_softmax_kernel_opt<T><<<grid, block, 0, stream>>>((T *)qk_buf_, attention_reweight, head_num, seq_len, mem_seq_len, scalar);
+  cross_softmax_kernel_opt<T><<<grid, block, 0, stream>>>((T *)qk_buf_, attention_reweight, padding_len, head_num, seq_len, mem_seq_len, scalar);
 }
 
-template void cross_softmax_kernel<float>(void *qk_buf_, const float *attention_reweight, const int &batch_size,
+template void cross_softmax_kernel<float>(void *qk_buf_, const float *attention_reweight, const int64_t *padding_len, const int &batch_size,
                                           const int &head_num, const int &seq_len, const int &mem_seq_len, const float &scalar, const cudaStream_t stream);
-template void cross_softmax_kernel<half>(void *qk_buf_, const float *attention_reweight, const int &batch_size,
+template void cross_softmax_kernel<half>(void *qk_buf_, const float *attention_reweight, const int64_t *padding_len, const int &batch_size,
                                          const int &head_num, const int &seq_len, const int &mem_seq_len, const float &scalar, const cudaStream_t stream);
-template void cross_softmax_kernel<nv_bfloat16>(void *qk_buf_, const float *attention_reweight, const int &batch_size,
+template void cross_softmax_kernel<nv_bfloat16>(void *qk_buf_, const float *attention_reweight, const int64_t *padding_len, const int &batch_size,
                                                 const int &head_num, const int &seq_len, const int &mem_seq_len, const float &scalar, const cudaStream_t stream);

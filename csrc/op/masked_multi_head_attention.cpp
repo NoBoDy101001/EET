@@ -181,9 +181,6 @@ namespace eet{
 
             // relative attention bias
             void* relative_attention_bias_ = relative_attention_bias.data_ptr();
-            // if (relative_attention_bias_ != nullptr) {
-            //     add_relative_attn_bias(qk_buf, relative_attention_bias_);
-            // }
 
             // softmax
             const int64_t *padding_len = pre_padding_length.data_ptr<int64_t>();
@@ -405,8 +402,8 @@ namespace eet{
         void MaskedMultiHeadAttention::qk_softmax(Buffer& qk_buf, void* relative_attention_bias, const int64_t *padding_len){
             // float scalar = 1 / sqrtf(size_per_head_ * 1.0f);
 
-            RUN_KERNEL(softmax_kernel,desc_.dtype_,qk_buf.data_ptr(), relative_attention_bias, padding_len,  cur_batch_size_,
-                    desc_.head_num_,cur_seq_len_, desc_.stream);
+            RUN_KERNEL(softmax_kernel, desc_.dtype_, qk_buf.data_ptr(), relative_attention_bias, padding_len, cur_batch_size_,
+                    desc_.head_num_, cur_seq_len_, desc_.stream);
 #ifdef _DEBUG_MODE_
     cudaDeviceSynchronize();
     check_cuda_error(cudaGetLastError());

@@ -16,7 +16,8 @@ void softmax_kernel_gpt2(T *qk_buf, T *position_bias, const int64_t* __restrict 
     __shared__ float s_sum, s_max;
     
     int left_padding_len = 0;
-    if (padding_index != nullptr){
+    if (padding_index != nullptr)
+    {
         left_padding_len = padding_index[batch_id];
     }
 
@@ -31,9 +32,9 @@ void softmax_kernel_gpt2(T *qk_buf, T *position_bias, const int64_t* __restrict 
     for(int i = left_padding_len; i < seq_len; ++i)
     {
       float qk = threadIdx.x <= i ? (float)qk_buf[threadIdx.x + qk_offset] + (float)position_bias[threadIdx.x + bias_offset] : 0.0f;
-      float left_padding_val = (threadIdx.x < left_padding_len)? -1e20f:0.0f;
-      float tmp = (threadIdx.x <= i ) ? (float)(qk + left_padding_val): -1e20f;
+      float padding_val = (threadIdx.x > i || threadIdx.x < left_padding_len) ? -1e20f : 0.0f;
 
+      float tmp = threadIdx.x < seq_len ? (float)(qk + padding_val): -1e20f;
       float max_val = blockReduceMax<float>(tmp);
 
       if(threadIdx.x == 0)
@@ -51,9 +52,10 @@ void softmax_kernel_gpt2(T *qk_buf, T *position_bias, const int64_t* __restrict 
       __syncthreads();
 
       if(threadIdx.x < seq_len)
-        qk_buf[threadIdx.x + qk_offset] = threadIdx.x <= i ?  (T)(qk / s_sum) : (T)0.0f;
+        qk_buf[threadIdx.x + qk_offset] = threadIdx.x <= i ? (T)(qk / s_sum) : (T)0.0f;
 
       qk_offset += seq_len;
+      bias_offset += seq_len;
     }
 }
 
