@@ -136,7 +136,6 @@ class MetaDesc{
     c10::ScalarType dtype_;             // torch dtype
     std::string algo_filename;
 
-    static std::string DEFAULT_DIR;
     static std::map<std::string, std::map<std::string, int>> algo_map_;
     static cublasHandle_t cublasHandle;
     static cublasLtHandle_t ltHandle;
@@ -172,8 +171,10 @@ class MetaDesc{
     }
 
 
-    void loadAlgoMap(std::string suffix) {
-        algo_filename = DEFAULT_DIR + getGPUName() + suffix;
+    void loadAlgoMap(const std::string& suffix) {
+        const char* default_dir_cstr = std::getenv("EET_HOME");
+        std::string default_dir = (default_dir_cstr == nullptr ? "" : default_dir_cstr);
+        algo_filename = default_dir + "/example/python/resource/eet_" + getGPUName() + suffix;
 
         FILE* fp;
         fp = fopen(algo_filename.c_str(), "r");
