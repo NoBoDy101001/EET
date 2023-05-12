@@ -64,20 +64,9 @@ void cross_softmax_kernel(void *qk_buf_, const float *attention_reweight, const 
                           const int &head_num, const int &seq_len, const int &mem_seq_len, const float &scalar, const cudaStream_t stream)
 {
   dim3 grid, block;
-
-  if (mem_seq_len <= 32)
-    block.x = 32;
-  else if (mem_seq_len > 32 && mem_seq_len <= 64)
-    block.x = 64;
-  else if (mem_seq_len > 64 && mem_seq_len <= 128)
-    block.x = 128;
-  else if (mem_seq_len > 128 && mem_seq_len <= 256)
-    block.x = 256;
-  else if (mem_seq_len > 256 && mem_seq_len <= 512)
-    block.x = 512;
-  else
-    block.x = 1024;
-
+  
+  assert(mem_seq_len <= 1024); // TODO
+  block.x = min(((mem_seq_len + 31) / 32) * 32, 1024);
   grid.x = batch_size * head_num;
   cross_softmax_kernel_opt<T><<<grid, block, 0, stream>>>((T *)qk_buf_, attention_reweight, padding_len, head_num, seq_len, mem_seq_len, scalar);
 }
