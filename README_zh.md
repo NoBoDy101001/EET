@@ -59,15 +59,15 @@ EET（Easy But Efficient Transformer）是一款针对Transformer-based大模型
 
 ### 环境
 
-* cuda:>=10.1 
+* cuda:>=11.0 
 * python:>=3.7 
 * gcc:>= 7.4.0 
-* torch:>=1.5.0 
+* torch:>=1.10.0 
 * numpy:>=1.19.1 
 * fairseq
-* transformers
+* transformers==4.22.0
 
-上述环境是最低配置，最好是使用较新的版本。
+上述环境是推荐配置。
 
 推荐使用nvcr.io/nvidia/镜像
 
@@ -220,6 +220,12 @@ out = nlp(input)
 
 使用方式见[example/python/pipelines](./example/python/pipelines),在这些任务示例代码中，我们也提供了model api示例来实现同样的任务。
 
+#### autotune加速
+- 自动搜索gemm最优配置
+1. 添加环境变量`EET_HOME`，export EET_HOME=<EET_source_dir>；
+2. 打开AUTOTUNE编译选项，根据部署场景预跑一次，搜索得到的最优参数保存在<EET_source_dir>/example/python/resource/eet_{device}_{dtype}.cfg文件中；
+- 部署
+1. 添加环境变量`EET_HOME`，export EET_HOME=<EET_source_dir>，关闭AUTOTUNE编译选项；
 
 ## 性能
 
