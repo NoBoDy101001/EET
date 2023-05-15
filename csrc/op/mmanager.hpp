@@ -141,7 +141,7 @@ namespace eet{
         //        false --> size smaller, then reuse
         Buffer& get_buffer(const size_t& size, const c10::ScalarType& dtype,
                            const torch::TensorOptions& options,
-                           bool strict = true,
+                           bool strict = false,
                            const std::string& name = "no_name") {
 
             for (auto &buffer : buffers_) {
