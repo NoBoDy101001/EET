@@ -253,7 +253,8 @@ class EETEncoderLayer():
 
 
 class EETEncoder():
-    def __init__(self, EncoderLayers):
+    def __init__(self, EncoderLayers, desc):
+        self.desc = desc
         self.layers = EncoderLayers
 
     def __call__(
@@ -282,7 +283,7 @@ class EETEncoder():
                     EETEncoderLayer.from_torch(config, layer_model_dict['layer.' + str(i)], i, data_type=data_type, bias=bias)
                 ]
             )
-        eet_encoder = EETEncoder(EncoderLayers)
+        eet_encoder = EETEncoder(EncoderLayers, config)
         return eet_encoder
 
 
@@ -367,7 +368,8 @@ class EETDecoderLayer():
 
 
 class EETDecoder():
-    def __init__(self, DecoderLayers):
+    def __init__(self, DecoderLayers, desc):
+        self.desc = desc
         self.layers = DecoderLayers
 
     def __call__(
@@ -406,5 +408,5 @@ class EETDecoder():
                 ]
             )
 
-        eet_decoder = EETDecoder(DecoderLayers)
+        eet_decoder = EETDecoder(DecoderLayers, config)
         return eet_decoder
