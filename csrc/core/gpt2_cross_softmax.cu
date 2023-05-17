@@ -15,6 +15,7 @@ void cross_softmax_kernel_opt(T *qk_buf_, const float* attention_reweight, const
 {
     int batch_id = blockIdx.x / head_num;
     int qk_offset = blockIdx.x * seq_len * mem_seq_len;
+    int reweight_offset = batch_id * mem_seq_len;
 
     __shared__ float s_sum, s_max;
     int right_padding_len = 0;
@@ -38,7 +39,7 @@ void cross_softmax_kernel_opt(T *qk_buf_, const float* attention_reweight, const
         
         // attn_output reweight 
         if (attention_reweight != nullptr){
-          qk = threadIdx.x < mem_seq_len ? __expf(tmp - s_max) * attention_reweight[threadIdx.x] : 0.0f;
+          qk = threadIdx.x < mem_seq_len ? __expf(tmp - s_max) * attention_reweight[threadIdx.x + reweight_offset] : 0.0f;
         }
         else{
           qk = threadIdx.x < mem_seq_len ? __expf(tmp - s_max) : 0.0f;
